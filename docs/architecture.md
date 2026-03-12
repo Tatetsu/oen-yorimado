@@ -11,8 +11,7 @@ graph TD
     E[スプレッドシート<br/>児童マスタ] --> D
 
     D -->|集計書き込み| F[スプレッドシート<br/>月別集計]
-    D -->|振り分け書き込み| G[スプレッドシート<br/>振り分け記録]
-    D -->|統合書き込み| H[スプレッドシート<br/>確定来館記録]
+    D -->|実データ+振り分け書き込み| H[スプレッドシート<br/>確定来館記録]
     D -->|カレンダー生成| H2[スプレッドシート<br/>来館カレンダー]
     H -->|参照・書き込み| I[スプレッドシート<br/>児童別ビュー]
 
@@ -64,17 +63,15 @@ sequenceDiagram
     participant GAS as GAS
     participant Master as 児童マスタ
     participant Form as フォームの回答
-    participant Alloc as 振り分け記録
     participant Confirmed as 確定来館記録
     participant Summary as 月別集計
 
     Trigger->>GAS: 実行開始
     GAS->>Master: 児童情報取得（枠・曜日・優先度）
-    GAS->>Form: 前月の来館データ取得
+    GAS->>Form: 対象月の来館データ取得
     GAS->>GAS: 残枠算出
     GAS->>GAS: 振り分けロジック実行
-    GAS->>Alloc: 振り分け結果書き込み
-    GAS->>Confirmed: 確定来館記録再生成
+    GAS->>Confirmed: 振り分け結果を確定来館記録に直接書き込み
     GAS->>Summary: 月別集計更新
 ```
 
@@ -100,26 +97,26 @@ sequenceDiagram
 
 | トリガー種別 | タイミング | 実行関数 | Phase |
 |---|---|---|---|
-| onFormSubmit | フォーム送信時 | updateMonthlySummary, generateConfirmedRecords | 1 |
-| 時間ベース | 毎月1日 | autoAllocatePoints | 2 |
-| 時間ベース | 毎朝（時刻指定） | sendParentEmail | 3 |
-| ボタン | 手動 | updateMonthlySummary | 1 |
-| ボタン | 手動 | updateChildView | 1 |
-| ボタン | 手動 | updateVisitCalendar | 1 |
-| ボタン | 手動 | runAllocation | 2 |
+| onFormSubmit | フォーム送信時 | updateMonthlySummary, updateConfirmedVisits, updateVisitCalendar | 1 |
+| onEdit | セル編集時 | updateChildView（B1/B2変更時）, updateVisitCalendar（B1変更時）, updateMonthlySummary（B1変更時） | 1 |
+| 時間ベース | 毎月1日 午前3時 | runMonthlyProcessAutomatic | 1+2 |
+| 時間ベース | 毎朝8時 | sendDailyVisitReports | 3 |
+| メニュー | 手動 | runMonthlyProcess（月次一括処理） | 1+2 |
+| メニュー | 手動 | updateConfirmedVisitsAndCalendar | 1 |
+| メニュー | 手動 | sendVisitReportsManual | 3 |
+| メニュー | 手動 | refreshDropdowns | 1 |
 
 ## ファイル構成（GAS）
 
 ```
 gas/
-├── main.gs              # エントリポイント・トリガー管理
+├── main.gs              # エントリポイント・トリガー管理・ボタン実行関数
 ├── setup.gs             # F-01: シート初期セットアップ
 ├── monthly-summary.gs   # F-02: 月別集計更新
 ├── confirmed-visits.gs  # F-03: 確定来館記録生成
 ├── child-view.gs        # F-04: 児童別ビュー更新
 ├── visit-calendar.gs    # 来館カレンダー（日×児童マトリクス表示）
 ├── allocation.gs        # F-05/F-06: 余りポイント振り分け
-├── email.gs             # F-07: 保護者メール送信（Phase 3）
-├── monthly-close.gs     # F-08: 月次確定処理（Phase 3）
-└── utils.gs             # 共通ユーティリティ
+├── email.gs             # F-07: 保護者メール送信
+└── utils.gs             # 共通ユーティリティ（定数・ヘルパー関数）
 ```

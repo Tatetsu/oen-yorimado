@@ -14,9 +14,9 @@ gas/
 ├── monthly-summary.gs   # F-02: 月別集計更新
 ├── confirmed-visits.gs  # F-03: 確定来館記録生成
 ├── child-view.gs        # F-04: 児童別ビュー更新
+├── visit-calendar.gs    # 来館カレンダー（日×児童マトリクス表示）
 ├── allocation.gs        # F-05/F-06: 余りポイント振り分け
-├── email.gs             # F-07: 保護者メール送信（Phase 3）
-├── monthly-close.gs     # F-08: 月次確定処理（Phase 3）
+├── email.gs             # F-07: 保護者メール送信
 └── utils.gs             # 共通ユーティリティ（定数・ヘルパー関数）
 ```
 
@@ -39,8 +39,8 @@ const SHEET_NAMES = {
   FORM_RESPONSE: 'フォームの回答',
   CHILD_MASTER: '児童マスタ',
   MONTHLY_SUMMARY: '月別集計',
-  ALLOCATION: '振り分け記録',
-  CONFIRMED: '確定来館記録',
+  VISIT_CALENDAR: '来館カレンダー',
+  CONFIRMED_VISITS: '確定来館記録',
   CHILD_VIEW: '児童別ビュー',
 };
 

@@ -33,23 +33,6 @@ erDiagram
         string notes "その他連絡事項"
     }
 
-    ALLOCATION_RECORD {
-        date target_month "対象年月"
-        string child_name FK "児童名"
-        date allocated_date "振り分け日"
-        string staff_name "スタッフ名"
-        time check_in "入所時間"
-        time check_out "退所時間"
-        float temperature "体温"
-        string meal "食事 ○/×"
-        string bath "入浴 ○/×"
-        string sleep "睡眠 ○/×"
-        string bowel "便 ○/×"
-        string medicine "服薬 ○/×"
-        string notes "その他連絡事項"
-        datetime executed_at "実行日時"
-    }
-
     CONFIRMED_RECORD {
         date record_date "記録日"
         string child_name FK "児童名"
@@ -67,7 +50,7 @@ erDiagram
     }
 
     MONTHLY_SUMMARY {
-        date target_month "対象年月"
+        int no "No."
         string child_name FK "児童名"
         int monthly_quota "月間利用枠"
         int visits "来館数"
@@ -76,11 +59,9 @@ erDiagram
     }
 
     CHILD_MASTER ||--o{ FORM_RESPONSE : "来館記録"
-    CHILD_MASTER ||--o{ ALLOCATION_RECORD : "振り分け対象"
     CHILD_MASTER ||--o{ CONFIRMED_RECORD : "確定記録"
     CHILD_MASTER ||--o{ MONTHLY_SUMMARY : "月別集計"
     FORM_RESPONSE }o--|| CONFIRMED_RECORD : "実データとして統合"
-    ALLOCATION_RECORD }o--|| CONFIRMED_RECORD : "振り分けとして統合"
 ```
 
 ## シート間データ関係
@@ -88,13 +69,12 @@ erDiagram
 ```
 児童マスタ (CHILD_MASTER)
   ├──→ フォームの回答 (FORM_RESPONSE)    ※児童名で紐付け
-  ├──→ 振り分け記録 (ALLOCATION_RECORD)   ※児童名で紐付け
   ├──→ 確定来館記録 (CONFIRMED_RECORD)    ※児童名で紐付け
   └──→ 月別集計 (MONTHLY_SUMMARY)         ※児童名で紐付け
 
-フォームの回答 ──┐
-                 ├──→ 確定来館記録 ──→ 児童別ビュー
-振り分け記録 ──┘
+フォームの回答 ──→ 確定来館記録 ──→ 児童別ビュー
+                   (実データ+振り分け)     来館カレンダー
+                                          月別集計
 ```
 
 ## シート定義詳細
@@ -110,7 +90,7 @@ erDiagram
 | 月間利用枠 | E | 数値 | ✓ | 1〜7 |
 | 医療型の有無 | F | テキスト | ✓ | あり / なし |
 | 担当スタッフ | G | テキスト | | |
-| 入所状況 | H | テキスト | ✓ | あり / なし |
+| 入所状況 | H | テキスト | ✓ | 稼働 / 休止 / 退所 |
 | 来館曜日 | I | テキスト | ✓ | 例: 月,水,金 |
 | 優先度 | J | 数値 | ✓ | 1が最優先 |
 
@@ -131,25 +111,6 @@ erDiagram
 | 便 | K | テキスト | | ○ / × |
 | 服薬 | L | テキスト | | ○ / × |
 | その他連絡事項 | M | テキスト | | |
-
-### シート: 振り分け記録
-
-| カラム | 列 | 型 | NOT NULL | 説明 |
-|--------|-----|------|----------|------|
-| 対象年月 | A | 日付 | ✓ | 月初日で格納（例: 2026/3/1） |
-| 児童名 | B | テキスト | ✓ | |
-| 振り分け日 | C | 日付 | ✓ | |
-| スタッフ名 | D | テキスト | | 児童マスタの担当スタッフ |
-| 入所時間 | E | 時刻 | | 同月実データの最頻値（なければ09:00） |
-| 退所時間 | F | 時刻 | | 同月実データの最頻値（なければ17:00） |
-| 体温 | G | 数値 | | 同月実データの最頻値（なければ36.5） |
-| 食事 | H | テキスト | | 同月実データの最頻値（なければ○） |
-| 入浴 | I | テキスト | | 同上 |
-| 睡眠 | J | テキスト | | 同上 |
-| 便 | K | テキスト | | 同上 |
-| 服薬 | L | テキスト | | 同上 |
-| その他連絡事項 | M | テキスト | | 自児童ノートからランダム選択→他児童→「特になし」 |
-| 実行日時 | N | 日時 | ✓ | GAS実行タイムスタンプ |
 
 ### シート: 確定来館記録
 
@@ -176,8 +137,8 @@ erDiagram
 | No. | A | 数値 | 児童マスタ参照 |
 | 児童名 | B | テキスト | 児童マスタ参照 |
 | 月間利用枠 | C | 数値 | 児童マスタ参照 |
-| 来館数 | D | 数値 | フォームの回答から集計 |
+| 来館数 | D | 数値 | 確定来館記録から集計 |
 | 残数 | E | 数値 | C - D |
 | 利用率 | F | 数値 | D / C（%表示） |
-| 担当スタッフ | G | テキスト | 児童マスタ参照 |
-| 入所状況 | H | テキスト | 児童マスタ参照 |
+
+※ 1行目=操作エリア（B1=対象年月）、2行目=ヘッダー、3行目〜=データ
