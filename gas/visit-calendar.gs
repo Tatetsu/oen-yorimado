@@ -16,8 +16,13 @@ function updateVisitCalendar() {
     return;
   }
 
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.toast('来館カレンダーを更新中...', '読み込み中', -1);
+
   var ym = parseYearMonth(yearMonthStr);
   updateVisitCalendarByMonth_(sheet, ym.year, ym.month);
+
+  ss.toast('来館カレンダーの更新が完了しました', '完了', 3);
 }
 
 /**
@@ -27,40 +32,50 @@ function updateVisitCalendar() {
  * @param {number} month 月（1-12）
  */
 function updateVisitCalendarByMonth_(sheet, year, month) {
-  // 稼働中の児童名リストを取得
-  var children = getActiveChildren();
-  var childNames = children.map(function(row) {
-    return row[MASTER_COL.NAME - 1];
-  });
-
-  if (childNames.length === 0) {
-    Logger.log('稼働中の児童がいません');
-    return;
-  }
-
   // 対象月の日数を取得
   var daysInMonth = new Date(year, month, 0).getDate();
 
-  // フォームの回答から来館データを取得
-  var formResponses = getFormResponsesByMonth(year, month);
+  // 確定来館記録から来館マップを構築
+  var visitMap = buildVisitMapFromConfirmed_(year, month);
 
-  // 振り分け記録を取得
-  var allocations = getAllocationsByMonth(year, month);
+  // 来館マップからその月に記録がある児童名を抽出
+  var visitedChildSet = {};
+  Object.keys(visitMap).forEach(function(key) {
+    var childName = key.split('_').slice(1).join('_'); // "yyyy/MM/dd_児童名" → 児童名
+    visitedChildSet[childName] = true;
+  });
 
-  // 来館マップを構築: { "YYYY/MM/DD_児童名": "実データ" or "振り分け" }
-  var visitMap = buildVisitMap_(formResponses, allocations);
+  // 児童マスタの並び順を維持しつつ、来館記録がある児童のみフィルタ
+  var allChildren = getChildMasterData();
+  var childNames = allChildren.map(function(row) {
+    return row[MASTER_COL.NAME - 1];
+  }).filter(function(name) {
+    return visitedChildSet[name];
+  });
 
   // --- データエリアをクリア（ヘッダー行より下） ---
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   if (lastRow >= CALENDAR_LAYOUT.HEADER_ROW) {
-    sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1, lastRow - CALENDAR_LAYOUT.HEADER_ROW + 1, Math.max(lastCol, childNames.length + 3)).clearContent();
-    sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1, lastRow - CALENDAR_LAYOUT.HEADER_ROW + 1, Math.max(lastCol, childNames.length + 3)).clearFormat();
+    var clearCols = Math.max(lastCol, childNames.length + 3);
+    sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1, lastRow - CALENDAR_LAYOUT.HEADER_ROW + 1, clearCols).clearContent();
+    sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1, lastRow - CALENDAR_LAYOUT.HEADER_ROW + 1, clearCols).clearFormat();
   }
+
+  if (childNames.length === 0) {
+    // データがない月：メッセージを表示して終了
+    sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1).setValue(year + '年' + month + '月の来館記録はありません');
+    sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1).setFontColor('#999999');
+    SpreadsheetApp.getUi().alert(year + '年' + month + '月の来館記録はありません。');
+    return;
+  }
+
+  // --- 祝日マップを取得 ---
+  var holidayMap = getJapaneseHolidays_(year, month);
 
   // --- ヘッダー行を書き込み ---
   var dailyTotalCol = CALENDAR_LAYOUT.CHILD_START_COL + childNames.length; // 日計列
-  var headerRow = ['日付'];
+  var headerRow = ['日付', '曜日'];
   childNames.forEach(function(name) {
     headerRow.push(name);
   });
@@ -76,11 +91,16 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   headerRange.setHorizontalAlignment('center');
 
   // --- 日別データ行を書き込み ---
+  var DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
   var dataRows = [];
+  var rowDowInfo = []; // 各行の曜日情報を保持（色付け用）
   for (var day = 1; day <= daysInMonth; day++) {
-    var dateStr = Utilities.formatDate(new Date(year, month - 1, day), 'Asia/Tokyo', 'yyyy/MM/dd');
+    var dateObj = new Date(year, month - 1, day);
+    var dateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy/MM/dd');
     var displayDate = month + '/' + day;
-    var row = [displayDate];
+    var dow = dateObj.getDay(); // 0=日, 6=土
+    var isHoliday = !!holidayMap[dateStr];
+    var row = [displayDate, DOW_LABELS[dow]];
     var dailyTotal = 0;
 
     childNames.forEach(function(name) {
@@ -98,24 +118,41 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
 
     row.push(dailyTotal > 0 ? dailyTotal : '');
     dataRows.push(row);
+    rowDowInfo.push({ dow: dow, isHoliday: isHoliday });
   }
 
   var dataStartRow = CALENDAR_LAYOUT.DATA_START_ROW;
   sheet.getRange(dataStartRow, 1, dataRows.length, headerRow.length).setValues(dataRows);
 
-  // データ行のセンタリング（児童列＋日計列）
-  sheet.getRange(dataStartRow, CALENDAR_LAYOUT.CHILD_START_COL, dataRows.length, childNames.length + 1)
+  // データ行のセンタリング（曜日列＋児童列＋日計列）
+  sheet.getRange(dataStartRow, CALENDAR_LAYOUT.DOW_COL, dataRows.length, childNames.length + 2)
     .setHorizontalAlignment('center');
 
-  // 来館ありの日を薄い背景色でハイライト
+  // 土日祝の行背景色と曜日文字色を設定
   for (var r = 0; r < dataRows.length; r++) {
-    for (var c = 1; c <= childNames.length; c++) {
-      var cellValue = dataRows[r][c];
+    var info = rowDowInfo[r];
+    var rowRange = sheet.getRange(dataStartRow + r, 1, 1, headerRow.length);
+
+    if (info.dow === 0 || info.isHoliday) {
+      // 日曜・祝日: 薄い赤背景、曜日文字を赤
+      rowRange.setBackground('#FFEBEE');
+      sheet.getRange(dataStartRow + r, CALENDAR_LAYOUT.DOW_COL).setFontColor('#D32F2F');
+    } else if (info.dow === 6) {
+      // 土曜: 薄い青背景、曜日文字を青
+      rowRange.setBackground('#E3F2FD');
+      sheet.getRange(dataStartRow + r, CALENDAR_LAYOUT.DOW_COL).setFontColor('#1565C0');
+    }
+  }
+
+  // 来館ありの日を薄い背景色でハイライト（土日祝の行色より上書き）
+  for (var r = 0; r < dataRows.length; r++) {
+    for (var c = 0; c < childNames.length; c++) {
+      var cellValue = dataRows[r][c + 2]; // 曜日列分オフセット
       if (cellValue === '○') {
-        sheet.getRange(dataStartRow + r, CALENDAR_LAYOUT.CHILD_START_COL + c - 1)
+        sheet.getRange(dataStartRow + r, CALENDAR_LAYOUT.CHILD_START_COL + c)
           .setBackground('#E8F5E9');
       } else if (cellValue === '△') {
-        sheet.getRange(dataStartRow + r, CALENDAR_LAYOUT.CHILD_START_COL + c - 1)
+        sheet.getRange(dataStartRow + r, CALENDAR_LAYOUT.CHILD_START_COL + c)
           .setBackground('#FFF3E0');
       }
     }
@@ -128,7 +165,7 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   var summaryData = getMonthlySummaryData_(year, month, childNames);
 
   // 月計行
-  var monthlyTotalRow = ['月計'];
+  var monthlyTotalRow = ['月計', ''];
   var grandTotal = 0;
   childNames.forEach(function(name) {
     var count = summaryData[name] ? summaryData[name].visits : 0;
@@ -138,7 +175,7 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   monthlyTotalRow.push(grandTotal);
 
   // 枠行
-  var quotaRow = ['枠'];
+  var quotaRow = ['枠', ''];
   var quotaTotal = 0;
   childNames.forEach(function(name) {
     var quota = summaryData[name] ? summaryData[name].quota : 0;
@@ -148,7 +185,7 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   quotaRow.push(quotaTotal);
 
   // 残行
-  var remainingRow = ['残'];
+  var remainingRow = ['残', ''];
   var remainingTotal = 0;
   childNames.forEach(function(name) {
     var remaining = summaryData[name] ? summaryData[name].remaining : 0;
@@ -169,7 +206,8 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   sheet.getRange(summaryStartRow + 2, 1, 1, headerRow.length).setBackground('#FFF8E1'); // 残: 黄
 
   // 列幅調整
-  sheet.setColumnWidth(1, 60); // 日付列
+  sheet.setColumnWidth(1, 60);  // 日付列
+  sheet.setColumnWidth(CALENDAR_LAYOUT.DOW_COL, 40);  // 曜日列
   for (var ci = 0; ci < childNames.length; ci++) {
     sheet.setColumnWidth(CALENDAR_LAYOUT.CHILD_START_COL + ci, 80);
   }
@@ -182,31 +220,32 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
 }
 
 /**
- * フォーム回答と振り分け記録から来館マップを構築する
- * @param {Array<Array>} formResponses フォーム回答データ
- * @param {Array<Array>} allocations 振り分けデータ
+ * 確定来館記録シートから指定月の来館マップを構築する
+ * @param {number} year 年
+ * @param {number} month 月（1-12）
  * @returns {Object} { "yyyy/MM/dd_児童名": "実データ" | "振り分け" }
  */
-function buildVisitMap_(formResponses, allocations) {
+function buildVisitMapFromConfirmed_(year, month) {
+  var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+  var lastRow = sheet.getLastRow();
   var map = {};
 
-  formResponses.forEach(function(row) {
-    var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
-    var dateStr = Utilities.formatDate(recordDate, 'Asia/Tokyo', 'yyyy/MM/dd');
-    var childName = row[FORM_COL.CHILD_NAME - 1];
-    var key = dateStr + '_' + childName;
-    map[key] = '実データ';
-  });
+  if (lastRow < CONFIRMED_DATA_START_ROW) {
+    return map;
+  }
 
-  allocations.forEach(function(row) {
-    var allocDate = new Date(row[ALLOCATION_COL.ALLOCATION_DATE - 1]);
-    var dateStr = Utilities.formatDate(allocDate, 'Asia/Tokyo', 'yyyy/MM/dd');
-    var childName = row[ALLOCATION_COL.CHILD_NAME - 1];
-    var key = dateStr + '_' + childName;
-    // 実データが既にある場合は上書きしない
-    if (!map[key]) {
-      map[key] = '振り分け';
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.DATA_TYPE).getValues();
+
+  data.forEach(function(row) {
+    var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
+    if (recordDate.getFullYear() !== year || (recordDate.getMonth() + 1) !== month) {
+      return;
     }
+    var dateStr = Utilities.formatDate(recordDate, 'Asia/Tokyo', 'yyyy/MM/dd');
+    var childName = row[CONFIRMED_COL.CHILD_NAME - 1];
+    var dataType = row[CONFIRMED_COL.DATA_TYPE - 1];
+    var key = dateStr + '_' + childName;
+    map[key] = dataType;
   });
 
   return map;
@@ -259,4 +298,28 @@ function getMonthlySummaryData_(year, month, childNames) {
   }
 
   return result;
+}
+
+/**
+ * Googleカレンダーから日本の祝日を取得する
+ * @param {number} year 年
+ * @param {number} month 月（1-12）
+ * @returns {Object} { "yyyy/MM/dd": 祝日名 }
+ */
+function getJapaneseHolidays_(year, month) {
+  var map = {};
+  try {
+    var cal = CalendarApp.getCalendarById('ja.japanese#holiday@group.v.calendar.google.com');
+    if (!cal) return map;
+    var startDate = new Date(year, month - 1, 1);
+    var endDate = new Date(year, month, 0);
+    var events = cal.getEvents(startDate, endDate);
+    events.forEach(function(event) {
+      var dateStr = Utilities.formatDate(event.getStartTime(), 'Asia/Tokyo', 'yyyy/MM/dd');
+      map[dateStr] = event.getTitle();
+    });
+  } catch (e) {
+    Logger.log('祝日カレンダーの取得に失敗: ' + e.message);
+  }
+  return map;
 }

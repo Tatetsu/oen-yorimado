@@ -1,6 +1,7 @@
 /**
  * F-05 / F-06: 余りポイント自動振り分け
  * 前月の来館記録から余りポイントを算出し、未来館日に自動振り分けする
+ * 振り分け結果は確定来館記録シートに直接書き込む（データ区分=「振り分け」）
  */
 
 /**
@@ -15,6 +16,22 @@ function runAllocationManual() {
     return;
   }
   var ym = parseYearMonth(yearMonthStr);
+
+  // 既に振り分け済みかチェック
+  if (hasAllocationsForMonth_(ym.year, ym.month)) {
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      '確認',
+      ym.year + '年' + ym.month + '月は既に振り分け済みです。\n' +
+      '再実行すると手動修正を含む既存の振り分けデータが全て上書きされます。\n\n' +
+      '本当に再実行しますか？',
+      ui.ButtonSet.YES_NO
+    );
+    if (response !== ui.Button.YES) {
+      return;
+    }
+  }
+
   allocateRemainingPoints_(ym.year, ym.month);
   SpreadsheetApp.getUi().alert(ym.year + '年' + ym.month + '月の振り分けが完了しました');
 }
@@ -25,9 +42,9 @@ function runAllocationManual() {
  */
 function runAllocationAutomatic() {
   var now = new Date();
-  var prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  var year = prevMonth.getFullYear();
-  var month = prevMonth.getMonth() + 1;
+  var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  var year = yesterday.getFullYear();
+  var month = yesterday.getMonth() + 1;
 
   try {
     allocateRemainingPoints_(year, month);
@@ -66,6 +83,9 @@ function setupAllocationTrigger() {
  * @param {number} month 対象月（1-12）
  */
 function allocateRemainingPoints_(year, month) {
+  // 0. 確定来館記録を対象月の実データで最新化（他の月はそのまま保持）
+  updateConfirmedVisits(year, month);
+
   // 1. 入所状況「稼働」の児童を取得
   var masterData = getChildMasterData();
   var activeChildren = masterData.filter(function(row) {
@@ -107,18 +127,19 @@ function allocateRemainingPoints_(year, month) {
     return priorityA - priorityB;
   });
 
+  // 5. 確定来館記録から対象月の既存振り分け行を削除（洗い替え）
+  clearAllocationsForMonth_(year, month);
+
   if (childrenWithRemaining.length === 0) {
     Logger.log('残枠のある児童がいません。振り分け不要です。');
-    clearAllocationsForMonth_(year, month);
-    updateConfirmedVisits();
     updateMonthlySummary();
     return;
   }
 
-  // 5. 対象月の全日付を取得
+  // 6. 対象月の全日付を取得
   var allDates = getAllDatesInMonth_(year, month);
 
-  // 6. 各日付の既存来館数マップを作成（実データのみ。振り分けは洗い替えするため含めない）
+  // 7. 各日付の既存来館数マップを作成（実データのみ）
   var dailyVisitCounts = {};
   allDates.forEach(function(date) {
     dailyVisitCounts[formatDateKey_(date)] = 0;
@@ -130,9 +151,6 @@ function allocateRemainingPoints_(year, month) {
     }
   });
 
-  // 7. 振り分け記録シートから対象月の既存データを削除（洗い替え）
-  clearAllocationsForMonth_(year, month);
-
   // 8. 各児童の補完データを事前計算
   var childDefaultsMap = {};
   activeChildren.forEach(function(row) {
@@ -142,7 +160,6 @@ function allocateRemainingPoints_(year, month) {
 
   // 9. 児童ごとに振り分けを実行
   var allocationResults = [];
-  var executedAt = new Date();
 
   childrenWithRemaining.forEach(function(row) {
     var childName = row[MASTER_COL.NAME - 1];
@@ -192,23 +209,22 @@ function allocateRemainingPoints_(year, month) {
         // 再度上限チェック（他の児童の振り分けで埋まっている可能性）
         if (dailyVisitCounts[selectedKey] >= MAX_VISITS_PER_DAY) continue;
 
-        // 振り分け確定
+        // 振り分け確定 → 確定来館記録の形式で追加
         var defaults = childDefaultsMap[childName];
         allocationResults.push([
-          new Date(year, month - 1, 1),  // 対象年月
-          childName,                      // 児童名
-          selectedDate,                   // 振り分け日
-          defaults.staffName,             // スタッフ名
-          defaults.checkIn,               // 入所時間
-          defaults.checkOut,              // 退所時間
-          defaults.temperature,           // 体温
-          defaults.meal,                  // 食事
-          defaults.bath,                  // 入浴
-          defaults.sleep,                 // 睡眠
-          defaults.bowel,                 // 便
-          defaults.medicine,              // 服薬
-          defaults.notes,                 // その他連絡事項
-          executedAt,                     // 実行日時
+          selectedDate,           // 記録日
+          childName,              // 児童名
+          '振り分け',              // データ区分
+          defaults.staffName,     // スタッフ名
+          defaults.checkIn,       // 入所時間
+          defaults.checkOut,      // 退所時間
+          defaults.temperature,   // 体温
+          defaults.meal,          // 食事
+          defaults.bath,          // 入浴
+          defaults.sleep,         // 睡眠
+          defaults.bowel,         // 便
+          defaults.medicine,      // 服薬
+          defaults.notes,         // その他連絡事項
         ]);
 
         dailyVisitCounts[selectedKey]++;
@@ -221,70 +237,113 @@ function allocateRemainingPoints_(year, month) {
     }
   });
 
-  // 10. 振り分け記録シートに書き込み
+  // 10. 確定来館記録シートに振り分け行を追加
   if (allocationResults.length > 0) {
-    writeAllocations_(allocationResults);
+    writeAllocationsToConfirmed_(allocationResults);
     Logger.log('振り分け完了: ' + allocationResults.length + '件');
   } else {
     Logger.log('振り分け結果: 0件（振り分け先がありません）');
   }
 
-  // 11. 確定来館記録を再生成
-  updateConfirmedVisits();
-
-  // 12. 月別集計を更新
+  // 11. 月別集計を更新
   updateMonthlySummary();
 }
 
 /**
- * 対象月の振り分け記録を削除する
+ * 対象月の振り分けが確定来館記録に存在するかチェックする
+ * @param {number} year 年
+ * @param {number} month 月（1-12）
+ * @returns {boolean} 振り分け行が存在する場合true
+ */
+function hasAllocationsForMonth_(year, month) {
+  var sheet;
+  try {
+    sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+  } catch (e) {
+    return false;
+  }
+  var lastRow = sheet.getLastRow();
+  if (lastRow < CONFIRMED_DATA_START_ROW) return false;
+
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 3).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var recordDate = new Date(data[i][CONFIRMED_COL.RECORD_DATE - 1]);
+    var dataType = data[i][CONFIRMED_COL.DATA_TYPE - 1];
+    if (dataType === '振り分け' &&
+        recordDate.getFullYear() === year &&
+        (recordDate.getMonth() + 1) === month) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 確定来館記録から対象月の振り分け行を削除する
  * @param {number} year 年
  * @param {number} month 月（1-12）
  */
 function clearAllocationsForMonth_(year, month) {
   var sheet;
   try {
-    sheet = getSheet(SHEET_NAMES.ALLOCATION);
+    sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
   } catch (e) {
     return;
   }
-  var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < CONFIRMED_DATA_START_ROW) return;
+
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 3).getValues();
 
   // 下の行から削除（行番号のずれを防ぐ）
-  for (var i = data.length - 1; i >= 1; i--) {
-    var targetMonth = new Date(data[i][ALLOCATION_COL.TARGET_MONTH - 1]);
-    if (targetMonth.getFullYear() === year && (targetMonth.getMonth() + 1) === month) {
-      sheet.deleteRow(i + 1);
+  for (var i = data.length - 1; i >= 0; i--) {
+    var recordDate = new Date(data[i][CONFIRMED_COL.RECORD_DATE - 1]);
+    var dataType = data[i][CONFIRMED_COL.DATA_TYPE - 1];
+    if (dataType === '振り分け' &&
+        recordDate.getFullYear() === year &&
+        (recordDate.getMonth() + 1) === month) {
+      sheet.deleteRow(CONFIRMED_DATA_START_ROW + i);
     }
   }
 }
 
 /**
- * 振り分け結果を振り分け記録シートに書き込む
- * @param {Array<Array>} results 振り分け結果の2次元配列（14列）
+ * 振り分け結果を確定来館記録シートに追加書き込みする
+ * @param {Array<Array>} results 振り分け結果の2次元配列（13列: 確定来館記録と同じ形式）
  */
-function writeAllocations_(results) {
-  var sheet = getSheet(SHEET_NAMES.ALLOCATION);
+function writeAllocationsToConfirmed_(results) {
+  var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+
+  // 既存データと振り分け結果をマージして日付順にソートし直す
   var lastRow = sheet.getLastRow();
-  var startRow = lastRow + 1;
+  var existingData = [];
+  if (lastRow >= CONFIRMED_DATA_START_ROW) {
+    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 13).getValues();
+  }
 
-  sheet.getRange(startRow, 1, results.length, ALLOCATION_COL_COUNT).setValues(results);
+  var allData = existingData.concat(results);
 
-  // 日付列の表示形式
-  sheet.getRange(startRow, ALLOCATION_COL.TARGET_MONTH, results.length, 1)
-    .setNumberFormat('yyyy/mm');
-  sheet.getRange(startRow, ALLOCATION_COL.ALLOCATION_DATE, results.length, 1)
+  // 日付昇順 → 児童名昇順でソート
+  allData.sort(function(a, b) {
+    var dateCompare = new Date(a[0]) - new Date(b[0]);
+    if (dateCompare !== 0) return dateCompare;
+    return String(a[1]).localeCompare(String(b[1]));
+  });
+
+  // 既存データをクリアして書き直し
+  if (lastRow >= CONFIRMED_DATA_START_ROW) {
+    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 13).clearContent();
+  }
+
+  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 13).setValues(allData);
+
+  // 記録日列の表示形式
+  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 1)
     .setNumberFormat('yyyy/mm/dd');
-  // 入所時間・退所時間
-  sheet.getRange(startRow, ALLOCATION_COL.CHECK_IN, results.length, 2)
+
+  // 入所時間・退所時間列の表示形式
+  sheet.getRange(CONFIRMED_DATA_START_ROW, CONFIRMED_COL.CHECK_IN, allData.length, 2)
     .setNumberFormat('H:mm');
-  // 体温
-  sheet.getRange(startRow, ALLOCATION_COL.TEMPERATURE, results.length, 1)
-    .setNumberFormat('0.0');
-  // 実行日時
-  sheet.getRange(startRow, ALLOCATION_COL.EXECUTED_AT, results.length, 1)
-    .setNumberFormat('yyyy/mm/dd H:mm:ss');
 }
 
 /**

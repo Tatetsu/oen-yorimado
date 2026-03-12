@@ -13,6 +13,7 @@ graph TD
     D -->|集計書き込み| F[スプレッドシート<br/>月別集計]
     D -->|振り分け書き込み| G[スプレッドシート<br/>振り分け記録]
     D -->|統合書き込み| H[スプレッドシート<br/>確定来館記録]
+    D -->|カレンダー生成| H2[スプレッドシート<br/>来館カレンダー]
     H -->|参照・書き込み| I[スプレッドシート<br/>児童別ビュー]
 
     I -->|印刷| J[印刷出力]
@@ -104,6 +105,7 @@ sequenceDiagram
 | 時間ベース | 毎朝（時刻指定） | sendParentEmail | 3 |
 | ボタン | 手動 | updateMonthlySummary | 1 |
 | ボタン | 手動 | updateChildView | 1 |
+| ボタン | 手動 | updateVisitCalendar | 1 |
 | ボタン | 手動 | runAllocation | 2 |
 
 ## ファイル構成（GAS）
@@ -115,6 +117,7 @@ gas/
 ├── monthly-summary.gs   # F-02: 月別集計更新
 ├── confirmed-visits.gs  # F-03: 確定来館記録生成
 ├── child-view.gs        # F-04: 児童別ビュー更新
+├── visit-calendar.gs    # 来館カレンダー（日×児童マトリクス表示）
 ├── allocation.gs        # F-05/F-06: 余りポイント振り分け
 ├── email.gs             # F-07: 保護者メール送信（Phase 3）
 ├── monthly-close.gs     # F-08: 月次確定処理（Phase 3）

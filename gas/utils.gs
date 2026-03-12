@@ -7,7 +7,6 @@ const SHEET_NAMES = {
   FORM_RESPONSE: 'フォームの回答',
   CHILD_MASTER: '児童マスタ',
   MONTHLY_SUMMARY: '月別集計',
-  ALLOCATION: '振り分け記録',
   VISIT_CALENDAR: '来館カレンダー',
   CONFIRMED_VISITS: '確定来館記録',
   CHILD_VIEW: '児童別ビュー',
@@ -58,32 +57,12 @@ const SUMMARY_COL = {
 
 // 来館カレンダーのレイアウト定数
 const CALENDAR_LAYOUT = {
-  HEADER_ROW: 3,       // ヘッダー行（日付 | 児童1 | 児童2 | ... | 日計）
+  HEADER_ROW: 3,       // ヘッダー行（日付 | 曜日 | 児童1 | 児童2 | ... | 日計）
   DATA_START_ROW: 4,   // データ開始行
   DATE_COL: 1,         // 日付列
-  CHILD_START_COL: 2,  // 児童列の開始
+  DOW_COL: 2,          // 曜日列
+  CHILD_START_COL: 3,  // 児童列の開始
 };
-
-// 振り分け記録の列インデックス（1始まり）
-const ALLOCATION_COL = {
-  TARGET_MONTH: 1,
-  CHILD_NAME: 2,
-  ALLOCATION_DATE: 3,
-  STAFF_NAME: 4,
-  CHECK_IN: 5,
-  CHECK_OUT: 6,
-  TEMPERATURE: 7,
-  MEAL: 8,
-  BATH: 9,
-  SLEEP: 10,
-  BOWEL: 11,
-  MEDICINE: 12,
-  NOTES: 13,
-  EXECUTED_AT: 14,
-};
-
-// 振り分け記録の列数
-const ALLOCATION_COL_COUNT = 14;
 
 // 振り分け補完用デフォルト値
 const ALLOCATION_DEFAULTS = {
@@ -211,31 +190,6 @@ function getFormResponsesByMonth(year, month) {
 }
 
 /**
- * 振り分け記録から指定年月のデータを取得する
- * @param {number} year 年
- * @param {number} month 月（1-12）
- * @returns {Array<Array>} 該当月の振り分けデータ
- */
-function getAllocationsByMonth(year, month) {
-  var sheet;
-  try {
-    sheet = getSheet(SHEET_NAMES.ALLOCATION);
-  } catch (e) {
-    Logger.log('振り分け記録シートが存在しません: ' + e.message);
-    return [];
-  }
-  var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
-    return [];
-  }
-  var records = data.slice(1);
-  return records.filter(function(row) {
-    var targetMonth = new Date(row[ALLOCATION_COL.TARGET_MONTH - 1]);
-    return targetMonth.getFullYear() === year && (targetMonth.getMonth() + 1) === month;
-  });
-}
-
-/**
  * 年月文字列をパースする（例: "2026年3月" → {year: 2026, month: 3}）
  * @param {string} yearMonthStr 年月文字列
  * @returns {{year: number, month: number}}
@@ -310,6 +264,30 @@ function getChildNameOptions() {
 }
 
 /**
+ * 児童別ビュー用: 全児童名を取得する（在籍中を先頭、退所済みを後半に配置）
+ * @returns {Array<string>} 児童名の配列
+ */
+function getAllChildNameOptions() {
+  var allChildren = getChildMasterData();
+  var active = [];
+  var inactive = [];
+
+  allChildren.forEach(function(row) {
+    var name = row[MASTER_COL.NAME - 1];
+    var status = row[MASTER_COL.ENROLLMENT - 1];
+    if (name) {
+      if (status === '稼働' || status === '休止') {
+        active.push(name);
+      } else {
+        inactive.push(name);
+      }
+    }
+  });
+
+  return active.concat(inactive);
+}
+
+/**
  * 確定来館記録から指定年月のデータを取得する
  * @param {number} year 年
  * @param {number} month 月（1-12）
@@ -332,4 +310,23 @@ function getConfirmedVisitsByMonth(year, month) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     return recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month;
   });
+}
+
+/**
+ * 確定来館記録から全期間のデータを取得する
+ * @returns {Array<Array>} 全期間の確定来館記録データ
+ */
+function getAllConfirmedVisits() {
+  var sheet;
+  try {
+    sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+  } catch (e) {
+    Logger.log('確定来館記録シートが存在しません: ' + e.message);
+    return [];
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return [];
+  }
+  return data.slice(1);
 }

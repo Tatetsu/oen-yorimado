@@ -9,19 +9,123 @@ function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('来館管理')
     .addItem('初期セットアップ', 'setupAllSheets')
+    .addItem('月次一括処理', 'runMonthlyProcess')
     .addSeparator()
-    .addItem('月別集計を更新', 'updateMonthlySummary')
-    .addItem('確定来館記録を更新', 'updateConfirmedVisits')
-    .addItem('来館カレンダーを更新', 'updateVisitCalendar')
-    .addItem('児童別ビューを更新', 'updateChildView')
-    .addSeparator()
-    .addItem('余りポイント振り分け実行', 'runAllocationManual')
-    .addSeparator()
+    .addItem('確定来館記録を手動更新', 'updateConfirmedVisitsAndCalendar')
     .addItem('来館報告メール手動送信', 'sendVisitReportsManual')
-    .addItem('メール送信トリガー設定', 'setupEmailTrigger')
-    .addSeparator()
     .addItem('ドロップダウンを更新', 'refreshDropdowns')
+    .addSeparator()
     .addToUi();
+}
+
+/**
+ * 月次一括処理: 月別集計 → 振り分け → 確定来館記録 → 来館カレンダーを一括実行する
+ * 月別集計シートのB1セル（対象年月）を参照して全処理を実行する
+ */
+function runMonthlyProcess() {
+  var ui = SpreadsheetApp.getUi();
+
+  // 年月選択ダイアログを表示
+  var options = generateYearMonthOptions();
+  if (options.length === 0) {
+    ui.alert('選択可能な年月がありません');
+    return;
+  }
+
+  // 現在の月別集計B1の値をデフォルトとして表示
+  var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
+  var currentValue = summarySheet.getRange('B1').getDisplayValue() || options[options.length - 1];
+
+  var prompt = '対象年月を選択してください（番号を入力）:\n\n';
+  for (var i = 0; i < options.length; i++) {
+    var marker = (options[i] === currentValue) ? ' ← 現在' : '';
+    prompt += (i + 1) + '. ' + options[i] + marker + '\n';
+  }
+
+  var response = ui.prompt('月次一括処理', prompt, ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  var input = response.getResponseText().trim();
+  var selectedIndex = parseInt(input, 10) - 1;
+  if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) {
+    ui.alert('無効な番号です。1〜' + options.length + 'の番号を入力してください。');
+    return;
+  }
+
+  var yearMonthStr = options[selectedIndex];
+  var ym = parseYearMonth(yearMonthStr);
+
+  // 月別集計B1を選択した年月に更新
+  summarySheet.getRange('B1').setValue(yearMonthStr);
+
+  // 1. 振り分け実行（内部で確定来館記録・月別集計も更新される）
+  allocateRemainingPoints_(ym.year, ym.month);
+
+  // 2. 来館カレンダーを更新
+  var calendarSheet = getSheet(SHEET_NAMES.VISIT_CALENDAR);
+  calendarSheet.getRange('B1').setValue(yearMonthStr);
+  updateVisitCalendarByMonth_(calendarSheet, ym.year, ym.month);
+
+  ui.alert(
+    ym.year + '年' + ym.month + '月の月次処理が完了しました\n' +
+    '・確定来館記録（振り分け含む）\n・月別集計\n・来館カレンダー'
+  );
+}
+
+/**
+ * 月次一括処理（トリガー用）: 前日の属する月を対象として全処理を自動実行する
+ * 月初（例: 4/1）に実行すると前日（3/31）の月 = 前月が対象になる
+ */
+function runMonthlyProcessAutomatic() {
+  var now = new Date();
+  var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  var year = yesterday.getFullYear();
+  var month = yesterday.getMonth() + 1;
+  var yearMonthStr = year + '年' + month + '月';
+
+  try {
+    // 月別集計B1を更新
+    var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
+    summarySheet.getRange('B1').setValue(yearMonthStr);
+
+    // 1. 振り分け実行（内部で確定来館記録・月別集計も更新される）
+    allocateRemainingPoints_(year, month);
+
+    // 2. 来館カレンダーを更新
+    var calendarSheet = getSheet(SHEET_NAMES.VISIT_CALENDAR);
+    calendarSheet.getRange('B1').setValue(yearMonthStr);
+    updateVisitCalendarByMonth_(calendarSheet, year, month);
+
+    Logger.log('月次自動処理完了: ' + yearMonthStr);
+  } catch (error) {
+    Logger.log('月次自動処理でエラー: ' + error.message);
+  }
+}
+
+/**
+ * セル編集時のトリガー関数
+ * 特定シートのB1セルが変更されたときに対応する更新処理を自動実行する
+ * @param {Object} e 編集イベントオブジェクト
+ */
+function onEdit(e) {
+  try {
+    var sheetName = e.range.getSheet().getName();
+    var cell = e.range.getA1Notation();
+
+    if (sheetName === SHEET_NAMES.CHILD_VIEW && (cell === 'B1' || cell === 'B2')) {
+      updateChildView();
+    } else if (cell === 'B1') {
+      if (sheetName === SHEET_NAMES.VISIT_CALENDAR) {
+        updateVisitCalendar();
+      } else if (sheetName === SHEET_NAMES.MONTHLY_SUMMARY) {
+        updateMonthlySummary();
+      }
+    }
+  } catch (error) {
+    Logger.log('onEditトリガーでエラー: ' + error.message);
+  }
 }
 
 /**
@@ -78,18 +182,23 @@ function refreshDropdowns() {
     // 年月リスト
     var yearMonthOptions = generateYearMonthOptions();
 
-    // 児童別ビューの児童名ドロップダウン更新
+    // 児童別ビューの児童名ドロップダウン更新（全児童: 在籍中→退所済みの順）
     var childViewSheet = getSheet(SHEET_NAMES.CHILD_VIEW);
-    var childNameRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(childNames, true)
+    var allChildNames = getAllChildNameOptions();
+    var childViewNameRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(allChildNames, true)
       .build();
-    childViewSheet.getRange('B1').setDataValidation(childNameRule);
+    childViewSheet.getRange('B1').setDataValidation(childViewNameRule);
 
-    // 児童別ビューの年月ドロップダウン更新
+    // 児童別ビューの年月ドロップダウン更新（「すべて」を先頭に追加）
     var yearMonthRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(yearMonthOptions, true)
       .build();
-    childViewSheet.getRange('B2').setDataValidation(yearMonthRule);
+    var childViewYmOptions = ['すべて'].concat(yearMonthOptions);
+    var childViewYmRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(childViewYmOptions, true)
+      .build();
+    childViewSheet.getRange('B2').setDataValidation(childViewYmRule);
 
     // 月別集計の年月ドロップダウン更新
     var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
@@ -135,4 +244,45 @@ function updateFormChildNameDropdown_(childNames) {
   }
 
   Logger.log('フォームの質問「' + questionTitle + '」が見つかりませんでした');
+}
+
+/**
+ * 月次一括処理の自動実行トリガーを設定する（手動で1回実行）
+ * 毎月1日の午前3時に前日（前月末日）の属する月を対象として全処理を実行する
+ */
+function setupMonthlyProcessTrigger() {
+  // 既存のrunMonthlyProcessAutomaticトリガーを削除
+  var triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'runMonthlyProcessAutomatic') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  // 毎月1日の午前3時に実行
+  ScriptApp.newTrigger('runMonthlyProcessAutomatic')
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(3)
+    .create();
+
+  Logger.log('月次一括処理トリガーを設定しました');
+  SpreadsheetApp.getUi().alert('月次一括処理トリガーを設定しました（毎月1日 午前3時）');
+}
+
+/**
+ * 確定来館記録を手動更新し、来館カレンダーも連動更新する
+ * メニュー「確定来館記録を手動更新」から実行される
+ */
+function updateConfirmedVisitsAndCalendar() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.toast('確定来館記録を更新中...', '処理中', -1);
+
+  updateConfirmedVisits();
+
+  ss.toast('来館カレンダーを更新中...', '処理中', -1);
+
+  updateVisitCalendar();
+
+  ss.toast('確定来館記録と来館カレンダーの更新が完了しました', '完了', 3);
 }

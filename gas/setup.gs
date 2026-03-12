@@ -1,6 +1,6 @@
 /**
  * F-01: シート初期セットアップ
- * 月別集計・振り分け記録・来館カレンダー・児童別ビューのシート作成、ヘッダー・書式設定
+ * 月別集計・確定来館記録・来館カレンダー・児童別ビューのシート作成、ヘッダー・書式設定
  */
 
 /**
@@ -10,7 +10,6 @@ function setupAllSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   setupMonthlySummarySheet_(ss);
-  setupAllocationSheet_(ss);
   setupConfirmedVisitsSheet_(ss);
   setupVisitCalendarSheet_(ss);
   setupChildViewSheet_(ss);
@@ -60,45 +59,6 @@ function setupMonthlySummarySheet_(ss) {
   sheet.setColumnWidth(5, 60);   // 残数
   sheet.setColumnWidth(6, 70);   // 利用率
   Logger.log('月別集計シートのセットアップ完了');
-}
-
-/**
- * 振り分け記録シートを作成・設定する
- * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
- */
-function setupAllocationSheet_(ss) {
-  var sheet = getOrCreateSheet_(ss, SHEET_NAMES.ALLOCATION);
-
-  // ヘッダー行
-  var headers = ['対象年月', '児童名', '振り分け日', 'スタッフ名', '入所時間', '退所時間', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項', '実行日時'];
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-
-  // ヘッダー書式設定
-  var headerRange = sheet.getRange(1, 1, 1, headers.length);
-  headerRange.setBackground('#4285F4');
-  headerRange.setFontColor('#FFFFFF');
-  headerRange.setFontWeight('bold');
-
-  // 行固定
-  sheet.setFrozenRows(1);
-
-  // 列幅調整
-  sheet.setColumnWidth(1, 100);   // 対象年月
-  sheet.setColumnWidth(2, 100);   // 児童名
-  sheet.setColumnWidth(3, 100);   // 振り分け日
-  sheet.setColumnWidth(4, 100);   // スタッフ名
-  sheet.setColumnWidth(5, 80);    // 入所時間
-  sheet.setColumnWidth(6, 80);    // 退所時間
-  sheet.setColumnWidth(7, 60);    // 体温
-  sheet.setColumnWidth(8, 50);    // 食事
-  sheet.setColumnWidth(9, 50);    // 入浴
-  sheet.setColumnWidth(10, 50);   // 睡眠
-  sheet.setColumnWidth(11, 50);   // 便
-  sheet.setColumnWidth(12, 50);   // 服薬
-  sheet.setColumnWidth(13, 200);  // その他連絡事項
-  sheet.setColumnWidth(14, 150);  // 実行日時
-
-  Logger.log('振り分け記録シートのセットアップ完了');
 }
 
 /**
@@ -208,6 +168,10 @@ function setupChildViewSheet_(ss) {
   // ラベル列を太字に
   sheet.getRange('A4:A8').setFontWeight('bold');
 
+  // 基本情報エリアの罫線（A4:B8）
+  var infoRange = sheet.getRange('A4:B8');
+  infoRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+
   // 来館履歴ヘッダー（9行目）
   var historyHeaders = ['記録日', 'スタッフ名', '入所時間', '退所時間', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
   sheet.getRange(9, 1, 1, historyHeaders.length).setValues([historyHeaders]);
@@ -217,25 +181,30 @@ function setupChildViewSheet_(ss) {
   headerRange.setBackground('#4285F4');
   headerRange.setFontColor('#FFFFFF');
   headerRange.setFontWeight('bold');
+  headerRange.setBorder(true, true, true, true, true, true, '#333333', SpreadsheetApp.BorderStyle.SOLID);
+
+  // ヘッダーテキストを中央寄せ
+  headerRange.setHorizontalAlignment('center');
 
   // 行固定
   sheet.setFrozenRows(9);
 
-  // 列幅調整
-  sheet.setColumnWidth(1, 100);  // 記録日
-  sheet.setColumnWidth(2, 100);  // スタッフ名
-  sheet.setColumnWidth(3, 80);   // 入所時間
-  sheet.setColumnWidth(4, 80);   // 退所時間
-  sheet.setColumnWidth(5, 60);   // 体温
-  sheet.setColumnWidth(6, 50);   // 食事
-  sheet.setColumnWidth(7, 50);   // 入浴
-  sheet.setColumnWidth(8, 50);   // 睡眠
-  sheet.setColumnWidth(9, 50);   // 便
-  sheet.setColumnWidth(10, 50);  // 服薬
-  sheet.setColumnWidth(11, 200); // その他連絡事項
+  // 列幅調整（A4横向き 約1050px に収まるよう最適化）
+  sheet.setColumnWidth(1, 90);   // 記録日
+  sheet.setColumnWidth(2, 90);   // スタッフ名
+  sheet.setColumnWidth(3, 65);   // 入所時間
+  sheet.setColumnWidth(4, 65);   // 退所時間
+  sheet.setColumnWidth(5, 50);   // 体温
+  sheet.setColumnWidth(6, 45);   // 食事
+  sheet.setColumnWidth(7, 45);   // 入浴
+  sheet.setColumnWidth(8, 45);   // 睡眠
+  sheet.setColumnWidth(9, 45);   // 便
+  sheet.setColumnWidth(10, 45);  // 服薬
+  sheet.setColumnWidth(11, 180); // その他連絡事項
 
-  // 印刷設定（A4横向き）
-  sheet.getRange('A1:L1').activate();
+  // フォントサイズを印刷向けに統一
+  sheet.getRange('A1:K100').setFontSize(10);
+  sheet.getRange('A1:A2').setFontWeight('bold');
 
   Logger.log('児童別ビューシートのセットアップ完了');
 }

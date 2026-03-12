@@ -1,11 +1,11 @@
 /**
  * F-02: 月別集計更新
- * フォームの回答から集計し、月別集計シートに値を書き込む
+ * 確定来館記録から集計し、月別集計シートに値を書き込む
  */
 
 /**
  * 月別集計を更新する（メイン処理）
- * 月別集計シートのB1セル（対象年月）とB2セル（入所状況フィルタ）を参照して集計する
+ * 月別集計シートのB1セル（対象年月）を参照して集計する
  */
 function updateMonthlySummary() {
   var sheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
@@ -18,14 +18,15 @@ function updateMonthlySummary() {
   }
   var ym = parseYearMonth(yearMonthStr);
 
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.toast('月別集計を更新中...', '読み込み中', -1);
+
   // 児童マスタ取得
   var masterData = getChildMasterData();
 
-  // フォームの回答から該当月データ取得
-  var formResponses = getFormResponsesByMonth(ym.year, ym.month);
-
-  // 児童名ごとの来館回数を集計
-  var visitCounts = countVisitsByChildName_(formResponses);
+  // 確定来館記録から該当月データ取得して集計
+  var confirmedVisits = getConfirmedVisitsByMonth(ym.year, ym.month);
+  var visitCounts = countVisitsByChildName_(confirmedVisits);
 
   // データエリアをクリア（ヘッダーは残す）
   var lastRow = sheet.getLastRow();
@@ -62,22 +63,23 @@ function updateMonthlySummary() {
   sheet.getRange(SUMMARY_DATA_START_ROW, SUMMARY_COL.USAGE_RATE, outputData.length, 1)
     .setNumberFormat('0%');
 
+  ss.toast('月別集計の更新が完了しました', '完了', 3);
   Logger.log('月別集計を更新しました: ' + yearMonthStr + ' (' + outputData.length + '名)');
 }
 
 /**
- * フォーム回答データから児童名ごとの来館回数を集計する
- * @param {Array<Array>} responses フォーム回答データ
+ * 確定来館記録データから児童名ごとの来館回数を集計する
+ * （実データ + 振り分けの両方をカウント）
+ * @param {Array<Array>} records 確定来館記録データ
  * @returns {Object} {児童名: 回数}
  */
-function countVisitsByChildName_(responses) {
+function countVisitsByChildName_(records) {
   var counts = {};
-  responses.forEach(function(row) {
-    var childName = row[FORM_COL.CHILD_NAME - 1];
+  records.forEach(function(row) {
+    var childName = row[CONFIRMED_COL.CHILD_NAME - 1];
     if (childName) {
       counts[childName] = (counts[childName] || 0) + 1;
     }
   });
   return counts;
 }
-
