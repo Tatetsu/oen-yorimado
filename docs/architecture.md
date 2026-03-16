@@ -101,6 +101,7 @@ sequenceDiagram
 | onEdit | セル編集時 | updateChildView（B1/B2変更時）, updateVisitCalendar（B1変更時）, updateMonthlySummary（B1変更時） | 1 |
 | 時間ベース | 毎月1日 午前3時 | runMonthlyProcessAutomatic | 1+2 |
 | 時間ベース | 毎朝8時 | sendDailyVisitReports | 3 |
+| onChange | ログシート変更時 | notifyErrorLog | 3 |
 | メニュー | 手動 | runMonthlyProcess（月次一括処理） | 1+2 |
 | メニュー | 手動 | updateConfirmedVisitsAndCalendar | 1 |
 | メニュー | 手動 | sendVisitReportsManual | 3 |
@@ -117,6 +118,6 @@ gas/
 ├── child-view.gs        # F-04: 児童別ビュー更新
 ├── visit-calendar.gs    # 来館カレンダー（日×児童マトリクス表示）
 ├── allocation.gs        # F-05/F-06: 余りポイント振り分け
-├── email.gs             # F-07: 保護者メール送信
-└── utils.gs             # 共通ユーティリティ（定数・ヘルパー関数）
+├── email.gs             # F-07: 保護者メール送信、F-10: エラー通知メール
+└── utils.gs             # 共通ユーティリティ（定数・ヘルパー関数・エラーログ）
 ```

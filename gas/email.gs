@@ -9,62 +9,86 @@
  * 前日の来館記録を保護者にメール送信する（自動トリガー用）
  */
 function sendDailyVisitReports() {
-  var yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  sendVisitReportsByDate_(yesterday);
+  try {
+    var yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    sendVisitReportsByDate_(yesterday);
+  } catch (error) {
+    logError_('sendDailyVisitReports', error);
+  }
 }
 
 /**
- * 手動実行用: ダイアログで対象日付を指定してメール送信する
+ * 手動実行用: HTMLダイアログで対象日付を選択してメール送信する
  */
 function sendVisitReportsManual() {
-  var ui = SpreadsheetApp.getUi();
-
-  // デフォルト値として前日の日付を設定
   var yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  var defaultDate = Utilities.formatDate(yesterday, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+  var defaultDate = Utilities.formatDate(yesterday, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
-  var response = ui.prompt(
-    '来館報告メール送信',
-    '対象日付を入力してください（例: ' + defaultDate + '）',
-    ui.ButtonSet.OK_CANCEL
-  );
+  var html = HtmlService.createHtmlOutput(
+    '<style>' +
+    '  body { font-family: "Google Sans", sans-serif; padding: 16px; }' +
+    '  h3 { margin: 0 0 16px; font-size: 16px; }' +
+    '  input[type="date"] { font-size: 16px; padding: 8px 12px; border: 1px solid #dadce0; border-radius: 4px; width: 100%; box-sizing: border-box; }' +
+    '  .buttons { margin-top: 20px; text-align: right; }' +
+    '  button { font-size: 14px; padding: 8px 24px; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px; }' +
+    '  .cancel { background: #f1f3f4; color: #5f6368; }' +
+    '  .submit { background: #1a73e8; color: #fff; }' +
+    '  .submit:hover { background: #1765cc; }' +
+    '</style>' +
+    '<h3>対象日付を選択してください</h3>' +
+    '<input type="date" id="targetDate" value="' + defaultDate + '">' +
+    '<div class="buttons">' +
+    '  <button class="cancel" onclick="google.script.host.close()">キャンセル</button>' +
+    '  <button class="submit" onclick="submitDate()">送信</button>' +
+    '</div>' +
+    '<script>' +
+    '  function submitDate() {' +
+    '    var date = document.getElementById("targetDate").value;' +
+    '    if (!date) { alert("日付を選択してください"); return; }' +
+    '    document.querySelector(".submit").disabled = true;' +
+    '    document.querySelector(".submit").textContent = "送信中...";' +
+    '    google.script.run' +
+    '      .withSuccessHandler(function(result) {' +
+    '        google.script.host.close();' +
+    '        if (result) { google.script.run.showResultAlert(result); }' +
+    '      })' +
+    '      .withFailureHandler(function(e) { alert("エラー: " + e.message); document.querySelector(".submit").disabled = false; document.querySelector(".submit").textContent = "送信"; })' +
+    '      .sendVisitReportsByDateFromDialog(date);' +
+    '  }' +
+    '</script>'
+  )
+  .setWidth(320)
+  .setHeight(180);
 
-  if (response.getSelectedButton() !== ui.Button.OK) {
-    return;
-  }
+  SpreadsheetApp.getUi().showModalDialog(html, '来館報告メール送信');
+}
 
-  var inputDate = response.getResponseText().trim();
-  if (!inputDate) {
-    inputDate = defaultDate;
-  }
-
-  // 日付パース（yyyy/MM/dd または yyyy-MM-dd）
-  var targetDate = parseDateInput_(inputDate);
+/**
+ * HTMLダイアログから呼ばれるメール送信処理
+ * @param {string} dateStr yyyy-MM-dd形式の日付文字列
+ */
+function sendVisitReportsByDateFromDialog(dateStr) {
+  var targetDate = parseDateInput_(dateStr);
   if (!targetDate) {
-    ui.alert('日付の形式が不正です。yyyy/MM/dd の形式で入力してください。');
-    return;
+    throw new Error('日付の形式が不正です: ' + dateStr);
   }
+  return sendVisitReportsByDate_(targetDate);
+}
 
-  var formattedDate = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-  var confirm = ui.alert(
-    '確認',
-    formattedDate + ' の来館記録をメール送信しますか？',
-    ui.ButtonSet.YES_NO
-  );
-
-  if (confirm !== ui.Button.YES) {
-    return;
-  }
-
-  sendVisitReportsByDate_(targetDate);
-  ui.alert('メール送信処理が完了しました。詳細はログを確認してください。');
+/**
+ * 処理結果をアラートダイアログで表示する（HTMLダイアログから呼び出し用）
+ * @param {string} message 表示するメッセージ
+ */
+function showResultAlert(message) {
+  SpreadsheetApp.getUi().alert('来館報告メール送信結果', message, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /**
  * 指定日の来館記録を保護者にメール送信する
  * @param {Date} targetDate 対象日付
+ * @returns {string} 処理結果メッセージ
  */
 function sendVisitReportsByDate_(targetDate) {
   var tz = Session.getScriptTimeZone();
@@ -75,7 +99,16 @@ function sendVisitReportsByDate_(targetDate) {
   var records = getFormResponsesByDate_(targetDate);
   if (records.length === 0) {
     Logger.log('対象日の来館記録がありません: ' + targetDateStr);
-    return;
+    return '対象日（' + targetDateStr + '）の来館記録がありません。';
+  }
+
+  // フォームの回答シート参照（送信済フラグ書き込み用）
+  var formSheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
+
+  // ヘッダーにメール送信済列がなければ設定
+  var headerValue = formSheet.getRange(1, FORM_COL.EMAIL_SENT).getValue();
+  if (!headerValue) {
+    formSheet.getRange(1, FORM_COL.EMAIL_SENT).setValue('メール送信済');
   }
 
   // 児童マスタを取得してマップ化（児童名 → 行データ）
@@ -91,8 +124,18 @@ function sendVisitReportsByDate_(targetDate) {
   var errorCount = 0;
 
   for (var i = 0; i < records.length; i++) {
-    var record = records[i];
+    var record = records[i].data;
+    var rowIndex = records[i].rowIndex;
     var childName = record[FORM_COL.CHILD_NAME - 1];
+
+    // 送信済チェック
+    var sentFlag = formSheet.getRange(rowIndex, FORM_COL.EMAIL_SENT).getValue();
+    if (sentFlag && String(sentFlag).indexOf('送信済') !== -1) {
+      Logger.log('送信済みのためスキップ: ' + childName + ' (行' + rowIndex + ')');
+      skipCount++;
+      continue;
+    }
+
     var masterRow = childMasterMap[childName];
 
     if (!masterRow) {
@@ -116,6 +159,11 @@ function sendVisitReportsByDate_(targetDate) {
         body: emailData.body,
         name: senderName,
       });
+
+      // 送信済フラグを書き込み
+      var sentTimestamp = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm');
+      formSheet.getRange(rowIndex, FORM_COL.EMAIL_SENT).setValue('送信済 ' + sentTimestamp);
+
       Logger.log('メール送信成功: ' + childName + ' → ' + parentEmail);
       sentCount++;
     } catch (error) {
@@ -124,13 +172,18 @@ function sendVisitReportsByDate_(targetDate) {
     }
   }
 
+  var resultMessage = '来館報告メール送信完了（' + targetDateStr + '）\n\n'
+    + '送信: ' + sentCount + '件\n'
+    + 'スキップ: ' + skipCount + '件\n'
+    + 'エラー: ' + errorCount + '件';
   Logger.log('来館報告メール送信完了: 送信=' + sentCount + '件, スキップ=' + skipCount + '件, エラー=' + errorCount + '件');
+  return resultMessage;
 }
 
 /**
- * フォームの回答から指定日のデータを取得する
+ * フォームの回答から指定日のデータを取得する（行番号付き）
  * @param {Date} targetDate 対象日付
- * @returns {Array<Array>} 該当日のフォーム回答データ
+ * @returns {Array<{rowIndex: number, data: Array}>} 該当日のフォーム回答データ（rowIndexはシート上の行番号、1始まり）
  */
 function getFormResponsesByDate_(targetDate) {
   var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
@@ -139,14 +192,19 @@ function getFormResponsesByDate_(targetDate) {
   var tz = Session.getScriptTimeZone();
   var targetStr = Utilities.formatDate(targetDate, tz, 'yyyy-MM-dd');
 
-  return responses.filter(function(row) {
-    var recordDate = row[FORM_COL.RECORD_DATE - 1];
-    if (!(recordDate instanceof Date)) {
-      return false;
-    }
+  var results = [];
+  for (var i = 0; i < responses.length; i++) {
+    var recordDate = responses[i][FORM_COL.RECORD_DATE - 1];
+    if (!(recordDate instanceof Date)) continue;
     var rowStr = Utilities.formatDate(recordDate, tz, 'yyyy-MM-dd');
-    return rowStr === targetStr;
-  });
+    if (rowStr === targetStr) {
+      results.push({
+        rowIndex: i + 2, // ヘッダー行(1行目)の次から
+        data: responses[i],
+      });
+    }
+  }
+  return results;
 }
 
 /**
@@ -229,6 +287,79 @@ function parseDateInput_(input) {
     return null;
   }
   return date;
+}
+
+/**
+ * ログシートに新しいエラーが追加されたときにメール通知する（トリガー用）
+ * 送信先: GAS実行者（固定） + スクリプトプロパティ ERROR_NOTIFY_EMAILS（任意・カンマ区切り）
+ */
+function notifyErrorLog() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEET_NAMES.LOG);
+    if (!sheet) return;
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return;
+
+    // 最新のエラー行を取得
+    var lastRowData = sheet.getRange(lastRow, 1, 1, 4).getValues()[0];
+    var timestamp = lastRowData[0];
+    var functionName = lastRowData[1];
+    var errorMessage = lastRowData[2];
+    var stackTrace = lastRowData[3];
+
+    // 送信先を構築（実行者 + 追加通知先）
+    var recipients = getErrorNotifyRecipients_();
+
+    var props = PropertiesService.getScriptProperties();
+    var facilityName = props.getProperty('FACILITY_NAME') || '施設';
+
+    var subject = '【' + facilityName + '】エラー通知: ' + functionName;
+    var body = 'エラーが発生しました。\n\n'
+      + '■ 発生日時: ' + timestamp + '\n'
+      + '■ 関数名: ' + functionName + '\n'
+      + '■ エラーメッセージ:\n' + errorMessage + '\n\n'
+      + '■ スタックトレース:\n' + (stackTrace || 'なし') + '\n\n'
+      + '---\n'
+      + 'スプレッドシート: ' + ss.getUrl() + '\n';
+
+    MailApp.sendEmail({
+      to: recipients.join(','),
+      subject: subject,
+      body: body,
+      name: facilityName + ' システム通知',
+    });
+
+    Logger.log('エラー通知メール送信完了: ' + recipients.join(', '));
+  } catch (e) {
+    Logger.log('エラー通知メール送信に失敗: ' + e.message);
+  }
+}
+
+/**
+ * エラー通知の送信先メールアドレスを取得する
+ * GAS実行者（固定） + スクリプトプロパティ ERROR_NOTIFY_EMAILS（カンマ区切り・任意）
+ * @returns {Array<string>} メールアドレスの配列（重複排除済み）
+ */
+function getErrorNotifyRecipients_() {
+  // GAS実行者は必ず含める
+  var ownerEmail = Session.getEffectiveUser().getEmail();
+  var recipients = [ownerEmail];
+
+  // 追加通知先があれば追加
+  var props = PropertiesService.getScriptProperties();
+  var extraEmails = props.getProperty('ERROR_NOTIFY_EMAILS') || '';
+  if (extraEmails.trim()) {
+    var extras = extraEmails.split(',').map(function(email) {
+      return email.trim();
+    }).filter(function(email) {
+      return email !== '' && email !== ownerEmail;
+    });
+    recipients = recipients.concat(extras);
+  }
+
+  return recipients;
 }
 
 /**

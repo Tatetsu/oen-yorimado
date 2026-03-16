@@ -13,6 +13,7 @@ function setupAllSheets() {
   setupConfirmedVisitsSheet_(ss);
   setupVisitCalendarSheet_(ss);
   setupChildViewSheet_(ss);
+  setupLogSheet_(ss);
 
   Logger.log('全シートの初期セットアップが完了しました');
   SpreadsheetApp.getUi().alert('初期セットアップが完了しました');
@@ -107,15 +108,15 @@ function setupVisitCalendarSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.VISIT_CALENDAR);
 
   // 操作エリア（1行目）
-  sheet.getRange('A1').setValue('対象年月:');
+  sheet.getRange('A1').setValue('対象:');
   sheet.getRange('A1').setFontWeight('bold');
 
-  // 年月ドロップダウン（B1）- デフォルトは前月
-  var yearMonthOptions = generateYearMonthOptions();
-  var yearMonthRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(yearMonthOptions, true)
+  // ドロップダウン（B1）- 年オプション + 月オプション
+  var calendarOptions = generateCalendarOptions();
+  var calendarRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(calendarOptions, true)
     .build();
-  sheet.getRange('B1').setDataValidation(yearMonthRule);
+  sheet.getRange('B1').setDataValidation(calendarRule);
 
   var now = new Date();
   var prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -207,6 +208,35 @@ function setupChildViewSheet_(ss) {
   sheet.getRange('A1:A2').setFontWeight('bold');
 
   Logger.log('児童別ビューシートのセットアップ完了');
+}
+
+/**
+ * ログシートを作成・設定する
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ */
+function setupLogSheet_(ss) {
+  var sheet = getOrCreateSheet_(ss, SHEET_NAMES.LOG);
+
+  // ヘッダー行
+  var headers = ['タイムスタンプ', '関数名', 'エラーメッセージ', 'スタックトレース'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  // ヘッダー書式設定
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setBackground('#4285F4');
+  headerRange.setFontColor('#FFFFFF');
+  headerRange.setFontWeight('bold');
+
+  // 行固定
+  sheet.setFrozenRows(1);
+
+  // 列幅調整
+  sheet.setColumnWidth(1, 160);
+  sheet.setColumnWidth(2, 200);
+  sheet.setColumnWidth(3, 400);
+  sheet.setColumnWidth(4, 400);
+
+  Logger.log('ログシートのセットアップ完了');
 }
 
 /**

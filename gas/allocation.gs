@@ -9,31 +9,37 @@
  * 月別集計シートのB1セル（対象年月）を参照して振り分けを実行する
  */
 function runAllocationManual() {
-  var sheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
-  var yearMonthStr = sheet.getRange('B1').getValue();
-  if (!yearMonthStr) {
-    SpreadsheetApp.getUi().alert('月別集計シートの対象年月を選択してください');
-    return;
-  }
-  var ym = parseYearMonth(yearMonthStr);
+  var ui = SpreadsheetApp.getUi();
 
-  // 既に振り分け済みかチェック
-  if (hasAllocationsForMonth_(ym.year, ym.month)) {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert(
-      '確認',
-      ym.year + '年' + ym.month + '月は既に振り分け済みです。\n' +
-      '再実行すると手動修正を含む既存の振り分けデータが全て上書きされます。\n\n' +
-      '本当に再実行しますか？',
-      ui.ButtonSet.YES_NO
-    );
-    if (response !== ui.Button.YES) {
+  try {
+    var sheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
+    var yearMonthStr = sheet.getRange('B1').getValue();
+    if (!yearMonthStr) {
+      ui.alert('月別集計シートの対象年月を選択してください');
       return;
     }
-  }
+    var ym = parseYearMonth(yearMonthStr);
 
-  allocateRemainingPoints_(ym.year, ym.month);
-  SpreadsheetApp.getUi().alert(ym.year + '年' + ym.month + '月の振り分けが完了しました');
+    // 既に振り分け済みかチェック
+    if (hasAllocationsForMonth_(ym.year, ym.month)) {
+      var response = ui.alert(
+        '確認',
+        ym.year + '年' + ym.month + '月は既に振り分け済みです。\n' +
+        '再実行すると手動修正を含む既存の振り分けデータが全て上書きされます。\n\n' +
+        '本当に再実行しますか？',
+        ui.ButtonSet.YES_NO
+      );
+      if (response !== ui.Button.YES) {
+        return;
+      }
+    }
+
+    allocateRemainingPoints_(ym.year, ym.month);
+    ui.alert(ym.year + '年' + ym.month + '月の振り分けが完了しました');
+  } catch (error) {
+    logError_('runAllocationManual', error);
+    ui.alert('エラーが発生しました: ' + error.message);
+  }
 }
 
 /**
@@ -50,7 +56,7 @@ function runAllocationAutomatic() {
     allocateRemainingPoints_(year, month);
     Logger.log('月初自動振り分け完了: ' + year + '年' + month + '月');
   } catch (error) {
-    Logger.log('月初自動振り分けでエラー: ' + error.message);
+    logError_('runAllocationAutomatic', error);
   }
 }
 
@@ -368,12 +374,20 @@ function getAllDatesInMonth_(year, month) {
  */
 function parseVisitDays_(visitDayStr) {
   if (!visitDayStr) return [];
-  var days = String(visitDayStr).split(',');
+  // 半角カンマ、全角カンマ（読点）、全角コンマ、スペース、改行で分割
+  var days = String(visitDayStr).split(/[,、，\s]+/);
   var result = [];
   days.forEach(function(day) {
     var trimmed = day.trim();
+    if (!trimmed) return;
+    // "月曜日" → "月"、"月曜" → "月" のように先頭1文字を抽出してマッチ
     if (DAY_OF_WEEK_MAP[trimmed] !== undefined) {
       result.push(DAY_OF_WEEK_MAP[trimmed]);
+    } else {
+      var firstChar = trimmed.charAt(0);
+      if (DAY_OF_WEEK_MAP[firstChar] !== undefined) {
+        result.push(DAY_OF_WEEK_MAP[firstChar]);
+      }
     }
   });
   return result;

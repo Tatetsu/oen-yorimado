@@ -10,6 +10,7 @@ const SHEET_NAMES = {
   VISIT_CALENDAR: '来館カレンダー',
   CONFIRMED_VISITS: '確定来館記録',
   CHILD_VIEW: '児童別ビュー',
+  LOG: 'ログ',
 };
 
 // 児童マスタの列インデックス（1始まり）
@@ -41,6 +42,7 @@ const FORM_COL = {
   BOWEL: 11,
   MEDICINE: 12,
   NOTES: 13,
+  EMAIL_SENT: 14,
 };
 
 // 月別集計の列インデックス（1始まり）
@@ -214,42 +216,30 @@ function parseYearMonth(yearMonthStr) {
 
 /**
  * 年月ドロップダウン用の選択肢を生成する
- * フォームの回答に存在する年月 + 当月・翌月をユニークに返す（昇順）
- * @returns {Array<string>} 年月文字列の配列
+ * 来月・今月・過去4ヶ月の6ヶ月分を降順で返す
+ * @returns {Array<string>} 年月文字列の配列（降順）
  */
 function generateYearMonthOptions() {
-  // キーとして "YYYY-MM" 形式で管理し、重複排除
-  var ymSet = {};
-
-  // 当月・翌月を常に含める
   var now = new Date();
-  for (var i = 0; i <= 1; i++) {
+  var options = [];
+  // 来月(+1) → 今月(0) → 過去4ヶ月(-1〜-4) の降順
+  for (var i = 1; i >= -4; i--) {
     var d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    var key = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM');
-    ymSet[key] = true;
+    options.push(d.getFullYear() + '年' + (d.getMonth() + 1) + '月');
   }
+  return options;
+}
 
-  // フォームの回答から年月を抽出
-  try {
-    var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
-    var data = sheet.getDataRange().getValues();
-    for (var r = 1; r < data.length; r++) {
-      var recordDate = data[r][FORM_COL.RECORD_DATE - 1];
-      if (recordDate instanceof Date && !isNaN(recordDate.getTime())) {
-        var key = Utilities.formatDate(recordDate, Session.getScriptTimeZone(), 'yyyy-MM');
-        ymSet[key] = true;
-      }
-    }
-  } catch (e) {
-    Logger.log('フォームの回答シートの読み取りに失敗: ' + e.message);
-  }
-
-  // キーを昇順ソートして表示文字列に変換
-  var keys = Object.keys(ymSet).sort();
-  return keys.map(function(key) {
-    var parts = key.split('-');
-    return parseInt(parts[0], 10) + '年' + parseInt(parts[1], 10) + '月';
-  });
+/**
+ * 来館カレンダー用の選択肢を生成する
+ * 年オプション（今年・昨年）+ 月オプション（6ヶ月分降順）
+ * @returns {Array<string>} 選択肢の配列
+ */
+function generateCalendarOptions() {
+  var now = new Date();
+  var currentYear = now.getFullYear();
+  var options = [currentYear + '年', (currentYear - 1) + '年'];
+  return options.concat(generateYearMonthOptions());
 }
 
 /**
@@ -313,6 +303,30 @@ function getConfirmedVisitsByMonth(year, month) {
 }
 
 /**
+ * 確定来館記録から指定年のデータを取得する
+ * @param {number} year 年
+ * @returns {Array<Array>} 該当年の確定来館記録データ
+ */
+function getConfirmedVisitsByYear(year) {
+  var sheet;
+  try {
+    sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+  } catch (e) {
+    Logger.log('確定来館記録シートが存在しません: ' + e.message);
+    return [];
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return [];
+  }
+  var records = data.slice(1);
+  return records.filter(function(row) {
+    var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
+    return recordDate.getFullYear() === year;
+  });
+}
+
+/**
  * 確定来館記録から全期間のデータを取得する
  * @returns {Array<Array>} 全期間の確定来館記録データ
  */
@@ -329,4 +343,50 @@ function getAllConfirmedVisits() {
     return [];
   }
   return data.slice(1);
+}
+
+/**
+ * "YYYY年" 形式から年を抽出する（"YYYY年M月" にはマッチしない）
+ * @param {string} str 入力文字列
+ * @returns {number|null} 年（マッチしない場合null）
+ */
+function parseYearOnly_(str) {
+  if (!str || str instanceof Date) return null;
+  var match = String(str).match(/^(\d{4})年$/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/**
+ * エラーをログシートに記録する
+ * @param {string} functionName エラーが発生した関数名
+ * @param {Error} error エラーオブジェクト
+ */
+function logError_(functionName, error) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEET_NAMES.LOG);
+
+    // ログシートが存在しない場合は自動作成
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEET_NAMES.LOG);
+      sheet.getRange(1, 1, 1, 4).setValues([['タイムスタンプ', '関数名', 'エラーメッセージ', 'スタックトレース']]);
+      sheet.getRange(1, 1, 1, 4)
+        .setBackground('#4285F4')
+        .setFontColor('#FFFFFF')
+        .setFontWeight('bold');
+      sheet.setFrozenRows(1);
+      sheet.setColumnWidth(1, 160);
+      sheet.setColumnWidth(2, 200);
+      sheet.setColumnWidth(3, 400);
+      sheet.setColumnWidth(4, 400);
+    }
+
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
+    var message = error.message || String(error);
+    var stack = error.stack || '';
+
+    sheet.appendRow([timestamp, functionName, message, stack]);
+  } catch (e) {
+    Logger.log('ログ出力に失敗: ' + e.message);
+  }
 }

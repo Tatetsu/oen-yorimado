@@ -23,7 +23,7 @@
 
 スプレッドシートの各シートを作成し、ヘッダー・書式・ドロップダウンを初期設定する。初回1回のみ実行。
 
-- **`setupAllSheets()`** — 月別集計・確定来館記録・来館カレンダー・児童別ビューの4シートを一括セットアップ
+- **`setupAllSheets()`** — 月別集計・確定来館記録・来館カレンダー・児童別ビュー・ログの5シートを一括セットアップ
 - 各シートのヘッダー行、列幅、行固定、データバリデーションを設定
 
 ---
@@ -33,13 +33,13 @@
 全ファイルから参照される定数・ヘルパー関数を定義。
 
 - **定数**: シート名（`SHEET_NAMES`）、各シートの列インデックス（`MASTER_COL`, `FORM_COL`, `SUMMARY_COL`, `CONFIRMED_COL` 等）、レイアウト定数、振り分けデフォルト値、メールテンプレート
-- **ヘルパー関数**: `getSheet()`, `getChildMasterData()`, `getActiveChildren()`, `getFormResponsesByMonth()`, `parseYearMonth()`, `generateYearMonthOptions()`, `getChildNameOptions()`, `getConfirmedVisitsByMonth()` 等
+- **ヘルパー関数**: `getSheet()`, `getChildMasterData()`, `getActiveChildren()`, `getFormResponsesByMonth()`, `parseYearMonth()`, `parseYearOnly_()`, `generateYearMonthOptions()`, `generateCalendarOptions()`, `getChildNameOptions()`, `getConfirmedVisitsByMonth()`, `getConfirmedVisitsByYear()`, `logError_()` 等
 
 ---
 
 ### `monthly-summary.gs` — 月別集計更新（F-02）
 
-確定来館記録（実データ＋振り分け）から児童ごとの来館数を集計し、月別集計シートに書き込む。
+フォームの回答（実記録のみ）から児童ごとの来館数を集計し、月別集計シートに書き込む。
 
 - **`updateMonthlySummary()`** — B1セルの対象年月を参照し、各児童の No.・児童名・月間利用枠・来館数・残数・利用率を算出して出力
 
@@ -57,7 +57,7 @@
 
 選択された児童・年月の確定来館記録を児童別ビューシートに書き込む。印刷にも対応。
 
-- **`updateChildView()`** — B1（児童名）・B2（年月/すべて）を参照し、基本情報と来館履歴を表示
+- **`updateChildView()`** — B1（児童名）・B2（年月/年/すべて）を参照し、基本情報と来館履歴を表示。月別・年別・全期間に対応
 - 基本情報: 保護者名・担当スタッフ・月間利用枠・医療型の有無・来館回数/残枠/利用率
 - **`prepareChildViewForPrint()`** / **`restoreChildViewFromPrint()`** — 印刷モードの切り替え
 
@@ -76,12 +76,13 @@
 
 ### `visit-calendar.gs` — 来館カレンダー更新
 
-日×児童のマトリクス形式で月間の来館状況を表示する。
+日×児童のマトリクス形式で来館状況を表示する。月別・年別表示に対応。
 
-- **`updateVisitCalendar()`** — B1セルの対象年月を参照してカレンダーを生成
+- **`updateVisitCalendar()`** — B1セルの値（「YYYY年M月」or「YYYY年」）を参照してカレンダーを生成
 - `○` = 実データ、`△` = 振り分けで視覚的に区別
 - 土日祝の行を色分け表示（祝日は Google カレンダーから取得）
-- 下部にサマリ行（月計・枠・残）を出力
+- ヘッダー直下にサマリ行（月計/枠/残 or 年計/月枠）を出力
+- 書式適用をバッチ処理で高速化
 
 ---
 
@@ -90,8 +91,10 @@
 来館記録を保護者にメールで通知する。
 
 - **`sendDailyVisitReports()`** — 前日の来館記録を自動送信（毎朝8時トリガー）
-- **`sendVisitReportsManual()`** — 日付指定による手動送信
+- **`sendVisitReportsManual()`** — HTMLダイアログで日付をカレンダーUIから選択して手動送信
+- **`notifyErrorLog()`** — ログシートにエラーが追加された際にメール通知
 - 児童マスタの保護者メールアドレスに対し、テンプレートベースでメールを作成・送信
+- フォームの回答N列に送信済フラグを書き込み、重複送信を防止
 - スクリプトプロパティ `FACILITY_NAME`, `EMAIL_SENDER_NAME` で施設名・送信者名を設定
 
 ---
@@ -119,3 +122,4 @@ GAS プロジェクトのマニフェストファイル。タイムゾーン（`
 | `FORM_CHILD_NAME_QUESTION` | フォーム内の児童名質問タイトル（デフォルト: `児童名`） |
 | `FACILITY_NAME` | メール本文に使用する施設名 |
 | `EMAIL_SENDER_NAME` | メール送信者名 |
+| `ERROR_NOTIFY_EMAILS` | エラー通知の追加送信先（カンマ区切り、任意） |
