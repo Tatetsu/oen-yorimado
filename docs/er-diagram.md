@@ -9,21 +9,33 @@ erDiagram
         string name "児童名"
         string parent_name "保護者名"
         string parent_email "保護者メールアドレス"
-        int monthly_quota "月間利用枠"
-        string medical_type "医療型の有無"
         string staff "担当スタッフ"
+        string medical_type "医療型の有無"
+        string medical_support "重度支援"
+        string priority "重度支援区分 区分1〜区分5"
+        int annual_quota "年間利用枠"
+        int monthly_quota "月間利用枠"
         string enrollment "入所状況"
         string visit_days "来館曜日"
-        int priority "優先度"
+        string non_visit_days "非来館曜日"
+        date departure_date "退所日"
+        string notes "備考"
+    }
+
+    SETTINGS {
+        int row PK "行番号"
+        string item "設定項目"
+        string value "デフォルト値"
+        string memo "備考"
     }
 
     FORM_RESPONSE {
         datetime timestamp PK "タイムスタンプ"
-        date record_date "記録日"
+        date record_date "記録日（入所日）"
         string staff_name "スタッフ名"
         string child_name FK "児童名"
-        time check_in "入所時間"
-        time check_out "退所時間"
+        datetime check_in "入所日時（宿泊は入所日+時刻）"
+        datetime check_out "退所日時（宿泊は退所日+時刻）"
         float temperature "体温"
         string meal "食事 ○/×"
         string bath "入浴 ○/×"
@@ -42,12 +54,12 @@ erDiagram
     }
 
     CONFIRMED_RECORD {
-        date record_date "記録日"
+        date record_date "記録日（宿泊展開後の各日付）"
         string child_name FK "児童名"
         string data_type "データ区分"
         string staff_name "スタッフ名（振り分けは補完値）"
-        time check_in "入所時間（振り分けは補完値）"
-        time check_out "退所時間（振り分けは補完値）"
+        datetime check_in "入所日時（元フォーム値を全行保持）"
+        datetime check_out "退所日時（元フォーム値を全行保持）"
         float temperature "体温（振り分けは補完値）"
         string meal "食事（振り分けは補完値）"
         string bath "入浴（振り分けは補完値）"
@@ -70,6 +82,7 @@ erDiagram
     CHILD_MASTER ||--o{ CONFIRMED_RECORD : "確定記録"
     CHILD_MASTER ||--o{ MONTHLY_SUMMARY : "月別集計"
     FORM_RESPONSE }o--|| CONFIRMED_RECORD : "実データとして統合"
+    SETTINGS ||--o{ CONFIRMED_RECORD : "振り分け設定（営業日等）"
 ```
 
 ## シート間データ関係
@@ -95,12 +108,42 @@ erDiagram
 | 児童名 | B | テキスト | ✓ | |
 | 保護者名 | C | テキスト | ✓ | |
 | 保護者メールアドレス | D | テキスト | ✓ | |
-| 月間利用枠 | E | 数値 | ✓ | 1〜7 |
+| 担当スタッフ | E | テキスト | | |
 | 医療型の有無 | F | テキスト | ✓ | あり / なし |
-| 担当スタッフ | G | テキスト | | |
-| 入所状況 | H | テキスト | ✓ | 稼働 / 休止 / 退所 |
-| 来館曜日 | I | テキスト | ✓ | 例: 月,水,金 |
-| 優先度 | J | 数値 | ✓ | 1が最優先 |
+| 重度支援 | G | テキスト | | あり / なし |
+| 重度支援区分 | H | テキスト | | 区分1〜区分5（プルダウン）。振り分け優先順位（区分1が最優先） |
+| 年間利用枠 | I | 数値 | | 年間の利用日数上限。空欄の場合は上限なし |
+| 月間利用枠 | J | 数値 | ✓ | |
+| 入所状況 | K | テキスト | ✓ | 稼働 / 休止 / 退所 |
+| 来館曜日 | L | テキスト | | 例: 月,水,金 |
+| 非来館曜日 | M | テキスト | | 振り分けの候補日から除外する曜日 |
+| 退所日 | N | 日付 | | |
+| 備考 | O | テキスト | | |
+
+### シート: 設定
+
+| カラム | 列 | 型 | 説明 |
+|--------|-----|------|------|
+| 設定項目 | B | テキスト | 設定名称 |
+| デフォルト値 | C | 任意 | 設定値 |
+| 備考 | D | テキスト | |
+
+| 行 | 設定項目 | 説明 |
+|----|---------|------|
+| 2 | 1日最大来館数 | 振り分け上限（デフォルト: 7） |
+| 3 | 入所時間 | 振り分け補完値のデフォルト |
+| 4 | 退所時間 | 振り分け補完値のデフォルト |
+| 5 | 営業日 | 振り分け対象曜日。空欄=全曜日対象 |
+| 6 | 体温 | 振り分け補完値のデフォルト |
+| 7 | 食事 | 振り分け補完値のデフォルト |
+| 8 | 入浴 | 振り分け補完値のデフォルト |
+| 9 | 睡眠 | 振り分け補完値のデフォルト |
+| 10 | 便 | 振り分け補完値のデフォルト |
+| 11 | 服薬 | 振り分け補完値のデフォルト |
+| 12 | 連絡事項 | 振り分け補完値のデフォルト |
+| 13 | エラー通知先メール | カンマ区切りで複数指定可 |
+| 14 | メール件名 | メールテンプレート |
+| 15 | メール本文 | メールテンプレート（プレースホルダー形式） |
 
 ### シート: フォームの回答
 
@@ -110,8 +153,8 @@ erDiagram
 | 記録日 | B | 日付 | ✓ | スタッフが入力 |
 | スタッフ名 | C | テキスト | ✓ | |
 | 児童名 | D | テキスト | ✓ | プルダウン選択 |
-| 入所時間 | E | 時刻 | ✓ | |
-| 退所時間 | F | 時刻 | | |
+| 入所日時 | E | 日時 | ✓ | 宿泊来館の場合は入所日+時刻 |
+| 退所日時 | F | 日時 | | 宿泊来館の場合は退所日+時刻 |
 | 体温 | G | 数値 | | |
 | 食事 | H | テキスト | | ○ / × |
 | 入浴 | I | テキスト | | ○ / × |
@@ -138,8 +181,8 @@ erDiagram
 | 児童名 | B | テキスト | ✓ | |
 | データ区分 | C | テキスト | ✓ | 実データ / 振り分け |
 | スタッフ名 | D | テキスト | | 振り分けは振り分け記録の補完値 |
-| 入所時間 | E | 時刻 | | 振り分けは振り分け記録の補完値 |
-| 退所時間 | F | 時刻 | | 振り分けは振り分け記録の補完値 |
+| 入所日時 | E | 日時 | | 元フォームの入所日時を全宿泊行に保持。振り分けは補完値 |
+| 退所日時 | F | 日時 | | 元フォームの退所日時を全宿泊行に保持。振り分けは補完値 |
 | 体温 | G | 数値 | | 振り分けは振り分け記録の補完値 |
 | 食事 | H | テキスト | | 振り分けは振り分け記録の補完値 |
 | 入浴 | I | テキスト | | 振り分けは振り分け記録の補完値 |

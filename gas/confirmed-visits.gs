@@ -19,7 +19,7 @@ function updateConfirmedVisits(year, month) {
   var lastRow = sheet.getLastRow();
   var existingData = [];
   if (lastRow >= CONFIRMED_DATA_START_ROW) {
-    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 13).getValues();
+    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 14).getValues();
   }
 
   // 既存データを「残す行」と「置き換える行」に分離
@@ -43,28 +43,39 @@ function updateConfirmedVisits(year, month) {
   var formData = filterByMonth ? getFormResponsesByMonth(year, month) : getFormResponsesAll_();
   var newRows = [];
   formData.forEach(function(row) {
-    newRows.push([
-      row[FORM_COL.RECORD_DATE - 1],     // 記録日
-      row[FORM_COL.CHILD_NAME - 1],      // 児童名
-      '実データ',                          // データ区分
-      row[FORM_COL.STAFF_NAME - 1],      // スタッフ名
-      row[FORM_COL.CHECK_IN - 1],        // 入所時間
-      row[FORM_COL.CHECK_OUT - 1],       // 退所時間
-      row[FORM_COL.TEMPERATURE - 1],     // 体温
-      row[FORM_COL.MEAL - 1],            // 食事
-      row[FORM_COL.BATH - 1],            // 入浴
-      row[FORM_COL.SLEEP - 1],           // 睡眠
-      row[FORM_COL.BOWEL - 1],           // 便
-      row[FORM_COL.MEDICINE - 1],        // 服薬
-      row[FORM_COL.NOTES - 1],           // その他連絡事項
-    ]);
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+    // 宿泊日数分の行に展開（1泊2日なら2行、同日なら1行）
+    var stayDates = expandStayToDates_(checkIn, checkOut);
+    stayDates.forEach(function(stayDate) {
+      // 月指定がある場合、対象月外の日付（翌月へ跨ぎなど）は除外
+      if (filterByMonth && (stayDate.getFullYear() !== year || (stayDate.getMonth() + 1) !== month)) {
+        return;
+      }
+      newRows.push([
+        stayDate,                              // 記録日（宿泊日ごとに展開）
+        row[FORM_COL.CHILD_NAME - 1],         // 児童名
+        '実データ',                             // データ区分
+        row[FORM_COL.STAFF_NAME - 1],         // スタッフ1
+        row[FORM_COL.STAFF_NAME_2 - 1],       // スタッフ2（任意・空欄の場合あり）
+        checkIn,                               // 入所日時（元の日時を保持）
+        checkOut,                              // 退所日時（元の日時を保持）
+        row[FORM_COL.TEMPERATURE - 1],        // 体温
+        row[FORM_COL.MEAL - 1],               // 食事
+        row[FORM_COL.BATH - 1],               // 入浴
+        row[FORM_COL.SLEEP - 1],              // 睡眠
+        row[FORM_COL.BOWEL - 1],              // 便
+        row[FORM_COL.MEDICINE - 1],           // 服薬
+        row[FORM_COL.NOTES - 1],              // その他連絡事項
+      ]);
+    });
   });
 
   var allData = keepRows.concat(newRows);
 
   // 既存データをクリア（ヘッダーは残す）
   if (lastRow >= CONFIRMED_DATA_START_ROW) {
-    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 13).clearContent();
+    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 14).clearContent();
   }
 
   if (allData.length === 0) {
@@ -80,15 +91,15 @@ function updateConfirmedVisits(year, month) {
   });
 
   // 書き込み
-  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 13).setValues(allData);
+  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 14).setValues(allData);
 
   // 記録日列の表示形式
   sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 1)
     .setNumberFormat('yyyy/mm/dd');
 
-  // 入所時間・退所時間列の表示形式
+  // 入所日時・退所日時列の表示形式
   sheet.getRange(CONFIRMED_DATA_START_ROW, CONFIRMED_COL.CHECK_IN, allData.length, 2)
-    .setNumberFormat('H:mm');
+    .setNumberFormat('yyyy/mm/dd H:mm');
 
   var scopeMsg = filterByMonth ? (year + '年' + month + '月分') : '全期間';
   Logger.log('確定来館記録を更新しました（' + scopeMsg + '）: ' + allData.length + '件');

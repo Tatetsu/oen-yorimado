@@ -14,7 +14,9 @@ function onOpen() {
     .addItem('確定来館記録を手動更新', 'updateConfirmedVisitsAndCalendar')
     .addItem('来館報告メール手動送信', 'sendVisitReportsManual')
     .addItem('ドロップダウンを更新', 'refreshDropdowns')
+    .addItem('児童マスタ ドロップダウン設定', 'refreshChildMasterValidations')
     .addSeparator()
+    .addItem('バウンスメールを確認', 'collectBounceEmailsManual')
     .addToUi();
 }
 
@@ -37,7 +39,9 @@ function runMonthlyProcess() {
     var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
     var currentValue = summarySheet.getRange('B1').getDisplayValue() || options[options.length - 1];
 
+    var year = getTargetYearFromFormResponses_();
     var prompt = '対象年月を選択してください（番号を入力）:\n\n';
+    prompt += '0. ' + year + '年（年次一括処理・全12ヶ月）\n';
     for (var i = 0; i < options.length; i++) {
       var marker = (options[i] === currentValue) ? ' ← 現在' : '';
       prompt += (i + 1) + '. ' + options[i] + marker + '\n';
@@ -49,9 +53,17 @@ function runMonthlyProcess() {
     }
 
     var input = response.getResponseText().trim();
-    var selectedIndex = parseInt(input, 10) - 1;
+    var inputNum = parseInt(input, 10);
+
+    // 0 = 年次一括処理
+    if (inputNum === 0) {
+      runAnnualProcess();
+      return;
+    }
+
+    var selectedIndex = inputNum - 1;
     if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) {
-      ui.alert('無効な番号です。1〜' + options.length + 'の番号を入力してください。');
+      ui.alert('無効な番号です。0〜' + options.length + 'の番号を入力してください。');
       return;
     }
 
@@ -201,21 +213,20 @@ function refreshDropdowns() {
       .build();
     childViewSheet.getRange('B1').setDataValidation(childViewNameRule);
 
-    // 児童別ビューの年月ドロップダウン更新（「すべて」+ 年オプション + 月オプション）
-    var now = new Date();
-    var currentYear = now.getFullYear();
-    var childViewYmOptions = ['すべて', currentYear + '年', (currentYear - 1) + '年'].concat(yearMonthOptions);
+    // 児童別ビューの年月ドロップダウン更新（すべて・年・月の選択肢を含む）
+    var childViewOptions = generateChildViewOptions();
     var childViewYmRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(childViewYmOptions, true)
+      .requireValueInList(childViewOptions, true)
       .build();
     childViewSheet.getRange('B2').setDataValidation(childViewYmRule);
 
-    // 月別集計の年月ドロップダウン更新
-    var yearMonthRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(yearMonthOptions, true)
+    // 月別集計の年月ドロップダウン更新（年全体オプション付き）
+    var summaryOptions = generateMonthlySummaryOptions();
+    var summaryYmRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(summaryOptions, true)
       .build();
     var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
-    summarySheet.getRange('B1').setDataValidation(yearMonthRule);
+    summarySheet.getRange('B1').setDataValidation(summaryYmRule);
 
     // 来館カレンダーの年月ドロップダウン更新（年オプション付き）
     var calendarOptions = generateCalendarOptions();
@@ -263,6 +274,43 @@ function updateFormChildNameDropdown_(childNames) {
   }
 
   Logger.log('フォームの質問「' + questionTitle + '」が見つかりませんでした');
+}
+
+/**
+ * 年次一括処理: 対象年の全12ヶ月を一括で処理する（月次ダイアログから呼び出し）
+ * 振り分け → 確定来館記録 → 月別集計を全月分実行し、最後に年別カレンダーを更新する
+ */
+function runAnnualProcess() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var year = getTargetYearFromFormResponses_();
+  var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
+  var calendarSheet = getSheet(SHEET_NAMES.VISIT_CALENDAR);
+
+  try {
+    ss.toast(year + '年の年次一括処理を開始します...', '処理中', -1);
+
+    for (var month = 1; month <= 12; month++) {
+      var yearMonthStr = year + '年' + month + '月';
+      ss.toast(yearMonthStr + ' を処理中...', '処理中', -1);
+      summarySheet.getRange('B1').setValue(yearMonthStr);
+      allocateRemainingPoints_(year, month);
+    }
+
+    // 来館カレンダーを年全体で更新
+    calendarSheet.getRange('B1').setValue(year + '年');
+    updateVisitCalendarByYear_(calendarSheet, year);
+
+    // 月別集計の表示を最終月に合わせて戻す（12月）
+    summarySheet.getRange('B1').setValue(year + '年12月');
+    updateMonthlySummary();
+
+    ss.toast(year + '年の年次一括処理が完了しました', '完了', 5);
+    ui.alert(year + '年の年次一括処理が完了しました\n・振り分け・確定来館記録（全12ヶ月）\n・来館カレンダー（年別）\n・月別集計（12月）');
+  } catch (error) {
+    logError_('runAnnualProcess', error);
+    ui.alert('エラーが発生しました: ' + error.message);
+  }
 }
 
 /**

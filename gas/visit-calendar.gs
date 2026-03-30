@@ -85,18 +85,21 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   var headerRow = buildHeaderRow_(childNames);
   var dailyTotalCol = CALENDAR_LAYOUT.CHILD_START_COL + childNames.length;
 
+  // 凡例（A2）
+  writeLegend_(sheet);
+
   // ヘッダー行
   writeHeaderRow_(sheet, headerRow);
 
-  // 集計行（月計/枠/残）をヘッダー直下に配置
+  // 集計行（月間利用数/月間利用枠/残り利用枠）をヘッダー直下に配置
   var summaryStartRow = CALENDAR_LAYOUT.HEADER_ROW + 1;
-  var summaryData = getMonthlySummaryData_(year, month, childNames);
-  writeMonthlySummary_(sheet, summaryStartRow, childNames, summaryData, headerRow.length);
+  writeMonthlySummary_(sheet, summaryStartRow, childNames, visitMap, allChildren, headerRow.length, year, month);
 
   // 日別データ（集計行の下から開始）
   var dataStartRow = summaryStartRow + 3;
   var DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
   var dataRows = [];
+  var typeRows = [];
   var rowDowInfo = [];
 
   for (var day = 1; day <= daysInMonth; day++) {
@@ -104,21 +107,24 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
     var dateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy/MM/dd');
     var dow = dateObj.getDay();
     var row = [month + '/' + day, DOW_LABELS[dow]];
+    var typeRow = ['', ''];
     var dailyTotal = 0;
 
     childNames.forEach(function(name) {
       var val = visitMap[dateStr + '_' + name];
-      if (val === '実データ') { row.push('○'); dailyTotal++; }
-      else if (val === '振り分け') { row.push('△'); dailyTotal++; }
-      else { row.push(''); }
+      if (val === '実データ') { row.push('○'); typeRow.push('実データ'); dailyTotal++; }
+      else if (val === '振り分け') { row.push('○'); typeRow.push('振り分け'); dailyTotal++; }
+      else { row.push(''); typeRow.push(''); }
     });
     row.push(dailyTotal > 0 ? dailyTotal : '');
+    typeRow.push('');
     dataRows.push(row);
+    typeRows.push(typeRow);
     rowDowInfo.push({ dow: dow, isHoliday: !!holidayMap[dateStr] });
   }
 
   sheet.getRange(dataStartRow, 1, dataRows.length, headerRow.length).setValues(dataRows);
-  applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, headerRow.length);
+  applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, headerRow.length, typeRows);
 
   // 児童数が変わった場合のみ列幅を再設定
   if (childNames.length !== prevChildCount) {
@@ -171,17 +177,21 @@ function updateVisitCalendarByYear_(sheet, year) {
   var headerRow = buildHeaderRow_(childNames);
   var dailyTotalCol = CALENDAR_LAYOUT.CHILD_START_COL + childNames.length;
 
+  // 凡例（A2）
+  writeLegend_(sheet);
+
   // ヘッダー行
   writeHeaderRow_(sheet, headerRow);
 
   // 集計行（年計/月枠）をヘッダー直下に配置
   var summaryStartRow = CALENDAR_LAYOUT.HEADER_ROW + 1;
-  writeYearlySummary_(sheet, summaryStartRow, childNames, allChildren, visitMap, headerRow.length);
+  writeYearlySummary_(sheet, summaryStartRow, childNames, allChildren, visitMap, headerRow.length, year);
 
   // 日別データ（集計行の下から開始）
-  var dataStartRow = summaryStartRow + 2;
+  var dataStartRow = summaryStartRow + 3;
   var DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
   var dataRows = [];
+  var typeRows = [];
   var rowDowInfo = [];
 
   for (var m = 1; m <= 12; m++) {
@@ -191,22 +201,25 @@ function updateVisitCalendarByYear_(sheet, year) {
       var dateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy/MM/dd');
       var dow = dateObj.getDay();
       var row = [m + '/' + day, DOW_LABELS[dow]];
+      var typeRow = ['', ''];
       var dailyTotal = 0;
 
       childNames.forEach(function(name) {
         var val = visitMap[dateStr + '_' + name];
-        if (val === '実データ') { row.push('○'); dailyTotal++; }
-        else if (val === '振り分け') { row.push('△'); dailyTotal++; }
-        else { row.push(''); }
+        if (val === '実データ') { row.push('○'); typeRow.push('実データ'); dailyTotal++; }
+        else if (val === '振り分け') { row.push('○'); typeRow.push('振り分け'); dailyTotal++; }
+        else { row.push(''); typeRow.push(''); }
       });
       row.push(dailyTotal > 0 ? dailyTotal : '');
+      typeRow.push('');
       dataRows.push(row);
+      typeRows.push(typeRow);
       rowDowInfo.push({ dow: dow, isHoliday: !!holidayMap[dateStr] });
     }
   }
 
   sheet.getRange(dataStartRow, 1, dataRows.length, headerRow.length).setValues(dataRows);
-  applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, headerRow.length);
+  applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, headerRow.length, typeRows);
 
   // 児童数が変わった場合のみ列幅を再設定
   if (childNames.length !== prevChildCount) {
@@ -222,6 +235,25 @@ function updateVisitCalendarByYear_(sheet, year) {
 // ========================================
 // 共通ヘルパー関数
 // ========================================
+
+/**
+ * A2セルに凡例をリッチテキストで書き込む
+ * 実データ=緑（#2E7D32）、振り分け=橙（#E65100）
+ */
+function writeLegend_(sheet) {
+  var text = '凡例: 緑=実データ  橙=振り分け';
+  // 文字位置（0始まり）: "凡例: " = 0-3, "緑=実データ" = 4-9, "  " = 10-11, "橙=振り分け" = 12-17
+  var green  = SpreadsheetApp.newTextStyle().setForegroundColor('#2E7D32').build();
+  var orange = SpreadsheetApp.newTextStyle().setForegroundColor('#E65100').build();
+  var richText = SpreadsheetApp.newRichTextValue()
+    .setText(text)
+    .setTextStyle(4, 10, green)   // 緑=実データ
+    .setTextStyle(12, 18, orange) // 橙=振り分け
+    .build();
+  var cell = sheet.getRange('A2');
+  cell.setRichTextValue(richText);
+  cell.setFontSize(9);
+}
 
 /**
  * ヘッダー行の配列を構築する
@@ -260,50 +292,59 @@ function writeHeaderRow_(sheet, headerRow) {
 }
 
 /**
- * 月別集計行（月計/枠/残）をヘッダー直下に書き込む
+ * 月別集計行（月間利用数/月間利用枠/残り利用枠）をヘッダー直下に書き込む
+ * visitMap から実データ・振り分け両方を含めて集計する
  */
-function writeMonthlySummary_(sheet, startRow, childNames, summaryData, totalCols) {
-  var monthlyTotalRow = ['月計', ''];
-  var grandTotal = 0;
-  childNames.forEach(function(name) {
-    var c = summaryData[name] ? summaryData[name].visits : 0;
-    monthlyTotalRow.push(c);
-    grandTotal += c;
+function writeMonthlySummary_(sheet, startRow, childNames, visitMap, allChildren, totalCols, year, month) {
+  // 月間利用数（実データ + 振り分け の合計）
+  var visitCounts = {};
+  childNames.forEach(function(n) { visitCounts[n] = 0; });
+  Object.keys(visitMap).forEach(function(key) {
+    var name = key.split('_').slice(1).join('_');
+    if (visitCounts[name] !== undefined) visitCounts[name]++;
   });
-  monthlyTotalRow.push(grandTotal);
 
-  var quotaRow = ['枠', ''];
-  var quotaTotal = 0;
-  childNames.forEach(function(name) {
-    var q = summaryData[name] ? summaryData[name].quota : 0;
-    quotaRow.push(q);
-    quotaTotal += q;
+  // 月間利用枠: 児童マスタの J列（MONTHLY_QUOTA）をそのまま使用
+  var masterQuotaMap = {};
+  allChildren.forEach(function(row) {
+    var name = row[MASTER_COL.NAME - 1];
+    masterQuotaMap[name] = row[MASTER_COL.MONTHLY_QUOTA - 1] || 0;
   });
-  quotaRow.push(quotaTotal);
 
-  var remainingRow = ['残', ''];
-  var remTotal = 0;
+  var monthlyTotalRow = ['月間利用数', ''];
   childNames.forEach(function(name) {
-    var r = summaryData[name] ? summaryData[name].remaining : 0;
-    remainingRow.push(r);
-    remTotal += r;
+    monthlyTotalRow.push(visitCounts[name] || 0);
   });
-  remainingRow.push(remTotal);
+  monthlyTotalRow.push(''); // 日計列は空
+
+  var quotaRow = ['月間利用枠', ''];
+  childNames.forEach(function(name) {
+    quotaRow.push(masterQuotaMap[name] || 0);
+  });
+  quotaRow.push(''); // 日計列は空
+
+  var remainingRow = ['残り利用枠', ''];
+  childNames.forEach(function(name) {
+    var q = masterQuotaMap[name] || 0;
+    var c = visitCounts[name] || 0;
+    remainingRow.push(q - c);
+  });
+  remainingRow.push(''); // 日計列は空
 
   sheet.getRange(startRow, 1, 3, totalCols)
     .setValues([monthlyTotalRow, quotaRow, remainingRow]);
 
   var range = sheet.getRange(startRow, 1, 3, totalCols);
   range.setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange(startRow, 1, 1, totalCols).setBackground('#E3F2FD');
-  sheet.getRange(startRow + 1, 1, 1, totalCols).setBackground('#F3E5F5');
-  sheet.getRange(startRow + 2, 1, 1, totalCols).setBackground('#FFF8E1');
+  sheet.getRange(startRow, 1, 1, totalCols).setBackground('#E3F2FD');      // 月間利用数：薄青
+  sheet.getRange(startRow + 1, 1, 1, totalCols).setBackground('#E8F5E9'); // 月間利用枠：薄緑
+  sheet.getRange(startRow + 2, 1, 1, totalCols).setBackground('#F3E5F5'); // 残り利用枠：薄紫（振り分け色 #FFF3E0 と区別）
 }
 
 /**
- * 年別集計行（年計/月枠）をヘッダー直下に書き込む
+ * 年別集計行（年計/年間枠/月間枠）をヘッダー直下に書き込む
  */
-function writeYearlySummary_(sheet, startRow, childNames, allChildren, visitMap, totalCols) {
+function writeYearlySummary_(sheet, startRow, childNames, allChildren, visitMap, totalCols, year) {
   var visitCounts = {};
   childNames.forEach(function(n) { visitCounts[n] = 0; });
   Object.keys(visitMap).forEach(function(key) {
@@ -312,40 +353,47 @@ function writeYearlySummary_(sheet, startRow, childNames, allChildren, visitMap,
   });
 
   var yearTotalRow = ['年計', ''];
-  var grandTotal = 0;
   childNames.forEach(function(name) {
     yearTotalRow.push(visitCounts[name]);
-    grandTotal += visitCounts[name];
   });
-  yearTotalRow.push(grandTotal);
+  yearTotalRow.push(''); // 日計列は空
 
-  var masterQuotaMap = {};
+  // 年間利用枠: 児童マスタの I列（ANNUAL_QUOTA）
+  // 月間利用枠: 児童マスタの J列（MONTHLY_QUOTA）
+  var annualQuotaMap = {};
+  var monthlyQuotaMap = {};
   allChildren.forEach(function(row) {
-    masterQuotaMap[row[MASTER_COL.NAME - 1]] = row[MASTER_COL.MONTHLY_QUOTA - 1] || 0;
+    var name = row[MASTER_COL.NAME - 1];
+    annualQuotaMap[name] = row[MASTER_COL.ANNUAL_QUOTA - 1] || 0;
+    monthlyQuotaMap[name] = row[MASTER_COL.MONTHLY_QUOTA - 1] || 0;
   });
 
-  var quotaRow = ['月枠', ''];
-  var quotaTotal = 0;
+  var annualQuotaRow = ['年間枠', ''];
   childNames.forEach(function(name) {
-    var q = masterQuotaMap[name] || 0;
-    quotaRow.push(q);
-    quotaTotal += q;
+    annualQuotaRow.push(annualQuotaMap[name] || 0);
   });
-  quotaRow.push(quotaTotal);
+  annualQuotaRow.push(''); // 日計列は空
 
-  sheet.getRange(startRow, 1, 2, totalCols)
-    .setValues([yearTotalRow, quotaRow]);
+  var monthlyQuotaRow = ['月間枠', ''];
+  childNames.forEach(function(name) {
+    monthlyQuotaRow.push(monthlyQuotaMap[name] || 0);
+  });
+  monthlyQuotaRow.push(''); // 日計列は空
 
-  var range = sheet.getRange(startRow, 1, 2, totalCols);
+  sheet.getRange(startRow, 1, 3, totalCols)
+    .setValues([yearTotalRow, annualQuotaRow, monthlyQuotaRow]);
+
+  var range = sheet.getRange(startRow, 1, 3, totalCols);
   range.setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange(startRow, 1, 1, totalCols).setBackground('#E3F2FD');
-  sheet.getRange(startRow + 1, 1, 1, totalCols).setBackground('#F3E5F5');
+  sheet.getRange(startRow, 1, 1, totalCols).setBackground('#E3F2FD');     // 年計：薄青
+  sheet.getRange(startRow + 1, 1, 1, totalCols).setBackground('#E8F5E9'); // 年間枠：薄緑
+  sheet.getRange(startRow + 2, 1, 1, totalCols).setBackground('#F3E5F5'); // 月間枠：薄紫
 }
 
 /**
  * 日別データ行の書式を一括適用する（バッチ処理で高速化）
  */
-function applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, totalCols) {
+function applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, totalCols, typeRows) {
   var numRows = dataRows.length;
   if (numRows === 0) return;
 
@@ -384,10 +432,10 @@ function applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNa
       // 児童セルのハイライト（土日祝の行色を上書き）
       var childIdx = c - (CALENDAR_LAYOUT.CHILD_START_COL - 1);
       if (childIdx >= 0 && childIdx < childNames.length) {
-        var val = dataRows[r][c];
-        if (val === '○') {
+        var type = typeRows[r][c];
+        if (type === '実データ') {
           bg = '#E8F5E9';
-        } else if (val === '△') {
+        } else if (type === '振り分け') {
           bg = '#FFF3E0';
         }
       }
@@ -478,54 +526,6 @@ function buildVisitMapFromConfirmedYear_(year) {
   return map;
 }
 
-/**
- * 月別集計シートから児童ごとの枠・来館数・残数を取得する
- * @param {number} year 年
- * @param {number} month 月
- * @param {Array<string>} childNames 児童名リスト
- * @returns {Object} { 児童名: { quota, visits, remaining } }
- */
-function getMonthlySummaryData_(year, month, childNames) {
-  var summarySheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
-
-  // 月別集計の対象年月を確認
-  var currentYm = summarySheet.getRange('B1').getValue();
-  var ym = parseYearMonth(currentYm);
-
-  // 対象年月が異なる場合は一時的に更新して取得
-  var needsRestore = false;
-  if (ym.year !== year || ym.month !== month) {
-    summarySheet.getRange('B1').setValue(year + '年' + month + '月');
-    updateMonthlySummary();
-    needsRestore = true;
-  }
-
-  // 月別集計データを読み取り
-  var lastRow = summarySheet.getLastRow();
-  var result = {};
-
-  if (lastRow >= SUMMARY_DATA_START_ROW) {
-    var data = summarySheet.getRange(SUMMARY_DATA_START_ROW, 1, lastRow - SUMMARY_DATA_START_ROW + 1, 6).getValues();
-    data.forEach(function(row) {
-      var name = row[SUMMARY_COL.NAME - 1];
-      if (name) {
-        result[name] = {
-          quota: row[SUMMARY_COL.QUOTA - 1] || 0,
-          visits: row[SUMMARY_COL.VISITS - 1] || 0,
-          remaining: row[SUMMARY_COL.REMAINING - 1] || 0,
-        };
-      }
-    });
-  }
-
-  // 元の年月に戻す
-  if (needsRestore) {
-    summarySheet.getRange('B1').setValue(currentYm);
-    updateMonthlySummary();
-  }
-
-  return result;
-}
 
 /**
  * Googleカレンダーから日本の祝日を取得する（月単位）

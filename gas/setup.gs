@@ -14,9 +14,35 @@ function setupAllSheets() {
   setupVisitCalendarSheet_(ss);
   setupChildViewSheet_(ss);
   setupLogSheet_(ss);
+  setupChildMasterValidations_();
 
   Logger.log('全シートの初期セットアップが完了しました');
   SpreadsheetApp.getUi().alert('初期セットアップが完了しました');
+}
+
+/**
+ * 児童マスタのドロップダウンを設定する（優先度 1〜5）
+ * 既存シートへの追加適用にも使用できる
+ */
+function setupChildMasterValidations_() {
+  var sheet = getSheet(SHEET_NAMES.CHILD_MASTER);
+  var lastRow = Math.max(sheet.getLastRow(), 2);
+
+  // 重度支援区分列（MASTER_COL.PRIORITY = 8列目）に 区分1〜区分5 のドロップダウンを設定
+  var priorityRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['区分1', '区分2', '区分3', '区分4', '区分5'], true)
+    .build();
+  sheet.getRange(2, MASTER_COL.PRIORITY, lastRow - 1, 1).setDataValidation(priorityRule);
+
+  Logger.log('児童マスタのドロップダウン設定完了（重度支援区分 区分1〜区分5）');
+}
+
+/**
+ * 児童マスタのドロップダウンを手動で再設定する（メニューから実行）
+ */
+function refreshChildMasterValidations() {
+  setupChildMasterValidations_();
+  SpreadsheetApp.getUi().alert('児童マスタのドロップダウンを更新しました（重度支援区分 区分1〜区分5）');
 }
 
 /**
@@ -29,15 +55,15 @@ function setupMonthlySummarySheet_(ss) {
   // 操作エリア（1行目）
   sheet.getRange('A1').setValue('対象年月:');
 
-  // 年月ドロップダウン（B1）
-  var yearMonthOptions = generateYearMonthOptions();
+  // 年月ドロップダウン（B1）- 年全体オプション + 月オプション
+  var summaryOptions = generateMonthlySummaryOptions();
   var yearMonthRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(yearMonthOptions, true)
+    .requireValueInList(summaryOptions, true)
     .build();
   sheet.getRange('B1').setDataValidation(yearMonthRule);
-  // 当月をデフォルトに設定
-  var now = new Date();
-  sheet.getRange('B1').setValue(now.getFullYear() + '年' + (now.getMonth() + 1) + '月');
+  // 対象年の1月をデフォルトに設定
+  var year = getTargetYearFromFormResponses_();
+  sheet.getRange('B1').setValue(year + '年1月');
 
   // ヘッダー行（2行目）
   var headers = ['No.', '児童名', '月間利用枠', '来館数', '残数', '利用率'];
@@ -70,7 +96,7 @@ function setupConfirmedVisitsSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.CONFIRMED_VISITS);
 
   // ヘッダー行
-  var headers = ['記録日', '児童名', 'データ区分', 'スタッフ名', '入所時間', '退所時間', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
+  var headers = ['記録日', '児童名', 'データ区分', 'スタッフ1', 'スタッフ2', '入所日時', '退所日時', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
   // ヘッダー書式設定
@@ -86,16 +112,17 @@ function setupConfirmedVisitsSheet_(ss) {
   sheet.setColumnWidth(1, 100);  // 記録日
   sheet.setColumnWidth(2, 100);  // 児童名
   sheet.setColumnWidth(3, 80);   // データ区分
-  sheet.setColumnWidth(4, 100);  // スタッフ名
-  sheet.setColumnWidth(5, 80);   // 入所時間
-  sheet.setColumnWidth(6, 80);   // 退所時間
-  sheet.setColumnWidth(7, 60);   // 体温
-  sheet.setColumnWidth(8, 50);   // 食事
-  sheet.setColumnWidth(9, 50);   // 入浴
-  sheet.setColumnWidth(10, 50);  // 睡眠
-  sheet.setColumnWidth(11, 50);  // 便
-  sheet.setColumnWidth(12, 50);  // 服薬
-  sheet.setColumnWidth(13, 200); // その他連絡事項
+  sheet.setColumnWidth(4, 100);  // スタッフ1
+  sheet.setColumnWidth(5, 100);  // スタッフ2
+  sheet.setColumnWidth(6, 130);  // 入所日時
+  sheet.setColumnWidth(7, 130);  // 退所日時
+  sheet.setColumnWidth(8, 60);   // 体温
+  sheet.setColumnWidth(9, 50);   // 食事
+  sheet.setColumnWidth(10, 50);  // 入浴
+  sheet.setColumnWidth(11, 50);  // 睡眠
+  sheet.setColumnWidth(12, 50);  // 便
+  sheet.setColumnWidth(13, 50);  // 服薬
+  sheet.setColumnWidth(14, 200); // その他連絡事項
 
   Logger.log('確定来館記録シートのセットアップ完了');
 }
@@ -118,12 +145,12 @@ function setupVisitCalendarSheet_(ss) {
     .build();
   sheet.getRange('B1').setDataValidation(calendarRule);
 
-  var now = new Date();
-  var prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  sheet.getRange('B1').setValue(prevMonth.getFullYear() + '年' + (prevMonth.getMonth() + 1) + '月');
+  // 対象年全体をデフォルトに設定
+  var calYear = getTargetYearFromFormResponses_();
+  sheet.getRange('B1').setValue(calYear + '年');
 
-  // 凡例（2行目）
-  sheet.getRange('A2').setValue('凡例: ○=実データ  △=振り分け');
+  // 凡例（2行目）- 色付きはカレンダー更新時に writeLegend_ が上書きするため簡易テキストで初期化
+  sheet.getRange('A2').setValue('凡例: 緑=実データ  橙=振り分け');
   sheet.getRange('A2').setFontSize(9);
   sheet.getRange('A2').setFontColor('#666666');
 
@@ -150,14 +177,15 @@ function setupChildViewSheet_(ss) {
     sheet.getRange('B1').setDataValidation(childNameRule);
   }
 
-  // 年月ドロップダウン（B2）
-  var yearMonthOptions = generateYearMonthOptions();
+  // 年月ドロップダウン（B2）- すべて・年・月の選択肢を含む
+  var childViewOptions = generateChildViewOptions();
   var yearMonthRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(yearMonthOptions, true)
+    .requireValueInList(childViewOptions, true)
     .build();
   sheet.getRange('B2').setDataValidation(yearMonthRule);
-  var now = new Date();
-  sheet.getRange('B2').setValue(now.getFullYear() + '年' + (now.getMonth() + 1) + '月');
+  // 対象年の1月をデフォルトに設定
+  var cvYear = getTargetYearFromFormResponses_();
+  sheet.getRange('B2').setValue(cvYear + '年1月');
 
   // 基本情報エリアのラベル（4〜8行目）
   sheet.getRange('A4').setValue('保護者名:');

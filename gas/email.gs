@@ -234,13 +234,11 @@ function buildEmailData_(record, masterRow, targetDate, facilityName) {
   var dateStr = Utilities.formatDate(targetDate, tz, 'M月d日');
   var childName = record[FORM_COL.CHILD_NAME - 1];
   var parentName = masterRow[MASTER_COL.PARENT_NAME - 1] || '';
-  var staffName = record[FORM_COL.STAFF_NAME - 1] || '';
 
-  var subject = '【' + facilityName + '】' + dateStr + ' ' + childName + 'さんの来館記録';
+  var subject = '【テスト施設　来館記録のお知らせ】';
 
   var body = EMAIL_TEMPLATE
     .replace(/{保護者名}/g, parentName)
-    .replace(/{施設名}/g, facilityName)
     .replace(/{日付}/g, dateStr)
     .replace(/{児童名}/g, childName)
     .replace(/{入所時間}/g, formatTime_(record[FORM_COL.CHECK_IN - 1]))
@@ -251,8 +249,7 @@ function buildEmailData_(record, masterRow, targetDate, facilityName) {
     .replace(/{睡眠}/g, record[FORM_COL.SLEEP - 1] || '')
     .replace(/{便}/g, record[FORM_COL.BOWEL - 1] || '')
     .replace(/{服薬}/g, record[FORM_COL.MEDICINE - 1] || '')
-    .replace(/{連絡事項}/g, record[FORM_COL.NOTES - 1] || '特になし')
-    .replace(/{スタッフ名}/g, staffName);
+    .replace(/{連絡事項}/g, record[FORM_COL.NOTES - 1] || '特になし');
 
   return { subject: subject, body: body };
 }

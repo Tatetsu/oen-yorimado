@@ -106,16 +106,20 @@ function allocateRemainingPoints_(year, month) {
   // 2. フォーム回答から対象月の実来館データ取得
   var formResponses = getFormResponsesByMonth(year, month);
 
-  // 3. 児童名ごとの実来館回数と来館日マップを作成
+  // 3. 児童名ごとの実来館回数と来館日マップを作成（宿泊は日数分カウント）
   var visitCountMap = {};
   var visitDateMap = {};  // {児童名: {日付文字列: true}}
   formResponses.forEach(function(row) {
     var childName = row[FORM_COL.CHILD_NAME - 1];
     if (!childName) return;
-    visitCountMap[childName] = (visitCountMap[childName] || 0) + 1;
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+    var stayDays = calcStayDays_(checkIn, checkOut);
+    visitCountMap[childName] = (visitCountMap[childName] || 0) + stayDays;
     if (!visitDateMap[childName]) visitDateMap[childName] = {};
-    var dateKey = formatDateKey_(new Date(row[FORM_COL.RECORD_DATE - 1]));
-    visitDateMap[childName][dateKey] = true;
+    expandStayToDates_(checkIn, checkOut).forEach(function(d) {
+      visitDateMap[childName][formatDateKey_(d)] = true;
+    });
   });
 
   // 4. 残枠がある児童を抽出し、優先度順にソート
@@ -128,8 +132,8 @@ function allocateRemainingPoints_(year, month) {
   });
 
   childrenWithRemaining.sort(function(a, b) {
-    var priorityA = a[MASTER_COL.PRIORITY - 1] || 9999;
-    var priorityB = b[MASTER_COL.PRIORITY - 1] || 9999;
+    var priorityA = parsePriority_(a[MASTER_COL.PRIORITY - 1]);
+    var priorityB = parsePriority_(b[MASTER_COL.PRIORITY - 1]);
     return priorityA - priorityB;
   });
 
@@ -151,10 +155,14 @@ function allocateRemainingPoints_(year, month) {
     dailyVisitCounts[formatDateKey_(date)] = 0;
   });
   formResponses.forEach(function(row) {
-    var dateKey = formatDateKey_(new Date(row[FORM_COL.RECORD_DATE - 1]));
-    if (dailyVisitCounts[dateKey] !== undefined) {
-      dailyVisitCounts[dateKey]++;
-    }
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+    expandStayToDates_(checkIn, checkOut).forEach(function(d) {
+      var dateKey = formatDateKey_(d);
+      if (dailyVisitCounts[dateKey] !== undefined) {
+        dailyVisitCounts[dateKey]++;
+      }
+    });
   });
 
   // 8. 各児童の補完データを事前計算
@@ -164,6 +172,9 @@ function allocateRemainingPoints_(year, month) {
     childDefaultsMap[childName] = computeChildDefaults_(childName, row, formResponses);
   });
 
+  // 年間利用枠チェック用: 当年の確定来館記録（実データ+振り分け）を集計
+  var ytdVisitMap = buildYtdVisitMap_(year);
+
   // 9. 児童ごとに振り分けを実行
   var allocationResults = [];
 
@@ -171,23 +182,53 @@ function allocateRemainingPoints_(year, month) {
     var childName = row[MASTER_COL.NAME - 1];
     var quota = row[MASTER_COL.MONTHLY_QUOTA - 1] || 0;
     var actualVisits = visitCountMap[childName] || 0;
-    var remaining = quota - actualVisits;
+
+    // 月間利用枠に ±1 のランダム幅を加える（年間累計超過は後段の annualRemaining チェックで制御）
+    var delta = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
+    var effectiveQuota = Math.max(0, quota + delta);
+    var remaining = effectiveQuota - actualVisits;
+
+    // 年間利用枠による上限チェック
+    var annualQuota = row[MASTER_COL.ANNUAL_QUOTA - 1];
+    if (annualQuota && annualQuota > 0) {
+      var ytdVisits = ytdVisitMap[childName] || 0;
+      var annualRemaining = annualQuota - ytdVisits;
+      if (annualRemaining <= 0) {
+        Logger.log(childName + ': 年間利用枠（' + annualQuota + '日）に達しているため振り分けスキップ');
+        return;
+      }
+      // 月次上限: 月間利用枠±1 と 年間枠の平日按分 の小さい方を採用
+      var monthlyMax = calcMonthlyQuota_(annualQuota, year, month);
+      var effectiveRemaining = Math.min(effectiveQuota, monthlyMax) - actualVisits;
+      if (effectiveRemaining <= 0) {
+        Logger.log(childName + ': 月次上限（月間枠' + effectiveQuota + '日 / 年間按分' + monthlyMax + '日）に達しているため振り分けスキップ');
+        return;
+      }
+      remaining = Math.min(effectiveRemaining, annualRemaining);
+    }
     var childVisitDates = visitDateMap[childName] || {};
     var visitDayStr = row[MASTER_COL.VISIT_DAYS - 1];
+    var nonVisitDayStr = row[MASTER_COL.NON_VISIT_DAYS - 1];
 
-    // 来館曜日を数値に変換
+    // 来館曜日・非来館曜日を数値に変換
     var visitDayNumbers = parseVisitDays_(visitDayStr);
+    var nonVisitDayNumbers = parseVisitDays_(nonVisitDayStr);
 
     // 候補日を作成: 来館済み・同一児童重複を除外
     var preferredDates = [];   // 来館曜日に該当する候補日
     var otherDates = [];       // その他の候補日
+    var businessDayNumbers = getBusinessDays();
 
     allDates.forEach(function(date) {
       var dateKey = formatDateKey_(date);
       // 既に来館済みの日は除外
       if (childVisitDates[dateKey]) return;
-      // 7名満枠の日は除外
-      if (dailyVisitCounts[dateKey] >= MAX_VISITS_PER_DAY) return;
+      // 振り分けは6名上限（7名目は実データ枠として確保）
+      if (dailyVisitCounts[dateKey] >= MAX_VISITS_PER_DAY - 1) return;
+      // 営業日以外は除外（設定シートに営業日が設定されている場合）
+      if (businessDayNumbers.length > 0 && businessDayNumbers.indexOf(date.getDay()) === -1) return;
+      // 非来館曜日は除外
+      if (nonVisitDayNumbers.length > 0 && nonVisitDayNumbers.indexOf(date.getDay()) !== -1) return;
 
       if (visitDayNumbers.length > 0 && visitDayNumbers.indexOf(date.getDay()) !== -1) {
         preferredDates.push(date);
@@ -213,7 +254,7 @@ function allocateRemainingPoints_(year, month) {
         var selectedKey = formatDateKey_(selectedDate);
 
         // 再度上限チェック（他の児童の振り分けで埋まっている可能性）
-        if (dailyVisitCounts[selectedKey] >= MAX_VISITS_PER_DAY) continue;
+        if (dailyVisitCounts[selectedKey] >= MAX_VISITS_PER_DAY - 1) continue;
 
         // 振り分け確定 → 確定来館記録の形式で追加
         var defaults = childDefaultsMap[childName];
@@ -221,7 +262,8 @@ function allocateRemainingPoints_(year, month) {
           selectedDate,           // 記録日
           childName,              // 児童名
           '振り分け',              // データ区分
-          defaults.staffName,     // スタッフ名
+          defaults.staffName,     // スタッフ1（固定スタッフ）
+          defaults.staffName2,    // スタッフ2（固定スタッフ）
           defaults.checkIn,       // 入所時間
           defaults.checkOut,      // 退所時間
           defaults.temperature,   // 体温
@@ -251,7 +293,10 @@ function allocateRemainingPoints_(year, month) {
     Logger.log('振り分け結果: 0件（振り分け先がありません）');
   }
 
-  // 11. 月別集計を更新
+  // 11. 7人満枠の日でスタッフ2が空欄の行に固定スタッフを補完
+  fillStaff2ForFullDays_(year, month);
+
+  // 12. 月別集計を更新
   updateMonthlySummary();
 }
 
@@ -262,24 +307,20 @@ function allocateRemainingPoints_(year, month) {
  * @returns {boolean} 振り分け行が存在する場合true
  */
 function hasAllocationsForMonth_(year, month) {
-  var sheet;
-  try {
-    sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
-  } catch (e) {
-    return false;
-  }
+  var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
   var lastRow = sheet.getLastRow();
   if (lastRow < CONFIRMED_DATA_START_ROW) return false;
 
+  var targetYM = year + '/' + ('0' + month).slice(-2);
+  var tz = Session.getScriptTimeZone();
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 3).getValues();
   for (var i = 0; i < data.length; i++) {
-    var recordDate = new Date(data[i][CONFIRMED_COL.RECORD_DATE - 1]);
     var dataType = data[i][CONFIRMED_COL.DATA_TYPE - 1];
-    if (dataType === '振り分け' &&
-        recordDate.getFullYear() === year &&
-        (recordDate.getMonth() + 1) === month) {
-      return true;
-    }
+    if (dataType !== '振り分け') continue;
+    var rawDate = data[i][CONFIRMED_COL.RECORD_DATE - 1];
+    if (!rawDate) continue;
+    var dateYM = Utilities.formatDate(new Date(rawDate), tz, 'yyyy/MM');
+    if (dateYM === targetYM) return true;
   }
   return false;
 }
@@ -324,7 +365,7 @@ function writeAllocationsToConfirmed_(results) {
   var lastRow = sheet.getLastRow();
   var existingData = [];
   if (lastRow >= CONFIRMED_DATA_START_ROW) {
-    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 13).getValues();
+    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 14).getValues();
   }
 
   var allData = existingData.concat(results);
@@ -338,18 +379,18 @@ function writeAllocationsToConfirmed_(results) {
 
   // 既存データをクリアして書き直し
   if (lastRow >= CONFIRMED_DATA_START_ROW) {
-    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 13).clearContent();
+    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 14).clearContent();
   }
 
-  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 13).setValues(allData);
+  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 14).setValues(allData);
 
   // 記録日列の表示形式
   sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 1)
     .setNumberFormat('yyyy/mm/dd');
 
-  // 入所時間・退所時間列の表示形式
+  // 入所日時・退所日時列の表示形式
   sheet.getRange(CONFIRMED_DATA_START_ROW, CONFIRMED_COL.CHECK_IN, allData.length, 2)
-    .setNumberFormat('H:mm');
+    .setNumberFormat('yyyy/mm/dd H:mm');
 }
 
 /**
@@ -365,6 +406,19 @@ function getAllDatesInMonth_(year, month) {
     dates.push(new Date(year, month - 1, d));
   }
   return dates;
+}
+
+/**
+ * 重度支援区分をソート用の数値に変換する
+ * @param {*} val 区分値（例: "区分1", "1", null）
+ * @returns {number} ソート用数値（未設定は9999）
+ */
+function parsePriority_(val) {
+  if (!val) return 9999;
+  var match = String(val).trim().match(/区分(\d+)/);
+  if (match) return parseInt(match[1], 10);
+  var num = parseInt(String(val), 10);
+  return isNaN(num) ? 9999 : num;
 }
 
 /**
@@ -413,8 +467,9 @@ function formatDateKey_(date) {
  * @returns {Object} 補完データ
  */
 function computeChildDefaults_(childName, masterRow, formResponses) {
-  // スタッフ名は児童マスタから取得
-  var staffName = masterRow[MASTER_COL.STAFF - 1] || '';
+  // スタッフ1は設定シートの固定スタッフ名。スタッフ2は空欄（7人満枠時のみ fillStaff2ForFullDays_ が補完）
+  var staffName = getDummyStaffName_();
+  var staffName2 = '';
 
   // 同じ児童の実データを抽出
   var childData = formResponses.filter(function(row) {
@@ -425,6 +480,7 @@ function computeChildDefaults_(childName, masterRow, formResponses) {
   if (childData.length > 0) {
     return {
       staffName: staffName,
+      staffName2: staffName2,
       checkIn: getModeValue_(childData, FORM_COL.CHECK_IN - 1, ALLOCATION_DEFAULTS.CHECK_IN),
       checkOut: getModeValue_(childData, FORM_COL.CHECK_OUT - 1, ALLOCATION_DEFAULTS.CHECK_OUT),
       temperature: getModeNumeric_(childData, FORM_COL.TEMPERATURE - 1, ALLOCATION_DEFAULTS.TEMPERATURE),
@@ -440,6 +496,7 @@ function computeChildDefaults_(childName, masterRow, formResponses) {
   // 実データがない場合はデフォルト値を使用
   return {
     staffName: staffName,
+    staffName2: staffName2,
     checkIn: ALLOCATION_DEFAULTS.CHECK_IN,
     checkOut: ALLOCATION_DEFAULTS.CHECK_OUT,
     temperature: ALLOCATION_DEFAULTS.TEMPERATURE,
@@ -541,6 +598,81 @@ function pickRandomNote_(childName, childData, allData) {
   }
 
   return ALLOCATION_DEFAULTS.NOTES;
+}
+
+/**
+ * 指定年の確定来館記録から児童ごとの来館数マップを構築する（年間利用枠チェック用）
+ * @param {number} year 対象年
+ * @returns {Object} { 児童名: 来館数 }
+ */
+function buildYtdVisitMap_(year) {
+  var records = getConfirmedVisitsByYear(year);
+  var map = {};
+  records.forEach(function(row) {
+    var name = row[CONFIRMED_COL.CHILD_NAME - 1];
+    if (name) {
+      map[name] = (map[name] || 0) + 1;
+    }
+  });
+  return map;
+}
+
+/**
+ * 7人満枠の日でスタッフ2が空欄の行に固定スタッフ名を補完する
+ * 対象月の確定来館記録を走査し、来館数が MAX_VISITS_PER_DAY 以上の日の
+ * スタッフ2列が空欄のレコードに設定シートの固定スタッフ名を書き込む
+ * @param {number} year 対象年
+ * @param {number} month 対象月（1-12）
+ */
+function fillStaff2ForFullDays_(year, month) {
+  var sheet;
+  try {
+    sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+  } catch (e) {
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < CONFIRMED_DATA_START_ROW) return;
+
+  var numRows = lastRow - CONFIRMED_DATA_START_ROW + 1;
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, 14).getValues();
+
+  // 対象月の行インデックスを収集し、日付ごとに来館数をカウント
+  var dailyCountMap = {};
+  var rowsByDate = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var recordDate = new Date(data[i][CONFIRMED_COL.RECORD_DATE - 1]);
+    if (recordDate.getFullYear() !== year || (recordDate.getMonth() + 1) !== month) continue;
+    var dateKey = formatDateKey_(recordDate);
+    dailyCountMap[dateKey] = (dailyCountMap[dateKey] || 0) + 1;
+    if (!rowsByDate[dateKey]) rowsByDate[dateKey] = [];
+    rowsByDate[dateKey].push(i);
+  }
+
+  // 7人以上の日でスタッフ2が空欄の行に固定スタッフを補完
+  var dummyStaff = getDummyStaffName_();
+  if (!dummyStaff) {
+    Logger.log('固定スタッフ名が設定シートに未設定のためスタッフ2補完をスキップ');
+    return;
+  }
+
+  var updated = false;
+  Object.keys(dailyCountMap).forEach(function(dateKey) {
+    if (dailyCountMap[dateKey] < MAX_VISITS_PER_DAY) return;
+    rowsByDate[dateKey].forEach(function(rowIdx) {
+      if (!data[rowIdx][CONFIRMED_COL.STAFF_NAME_2 - 1]) {
+        data[rowIdx][CONFIRMED_COL.STAFF_NAME_2 - 1] = dummyStaff;
+        updated = true;
+      }
+    });
+  });
+
+  if (!updated) return;
+
+  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, 14).setValues(data);
+  Logger.log('スタッフ2補完完了: ' + year + '年' + month + '月（7人満枠日対象）');
 }
 
 /**
