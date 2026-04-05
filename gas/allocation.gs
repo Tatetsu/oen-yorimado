@@ -92,10 +92,19 @@ function allocateRemainingPoints_(year, month) {
   // 0. 確定来館記録を対象月の実データで最新化（他の月はそのまま保持）
   updateConfirmedVisits(year, month);
 
-  // 1. 入所状況「稼働」の児童を取得
+  // 1. 振り分け対象の児童を取得
+  //    - 稼働: 通常の振り分け対象
+  //    - 退所（別施設移動無）: 退所月の残枠を振り分け対象にする
+  //    - 退所（別施設移動）: 振り分け対象外
   var masterData = getChildMasterData();
   var activeChildren = masterData.filter(function(row) {
-    return row[MASTER_COL.ENROLLMENT - 1] === '稼働';
+    var enrollment = row[MASTER_COL.ENROLLMENT - 1];
+    if (enrollment === '稼働') return true;
+    if (enrollment === '退所') {
+      var departureStatus = row[MASTER_COL.DEPARTURE_STATUS - 1];
+      return departureStatus === '別施設移動無';
+    }
+    return false;
   });
 
   if (activeChildren.length === 0) {
@@ -106,7 +115,7 @@ function allocateRemainingPoints_(year, month) {
   // 2. フォーム回答から対象月の実来館データ取得
   var formResponses = getFormResponsesByMonth(year, month);
 
-  // 3. 児童名ごとの実来館回数と来館日マップを作成（宿泊は日数分カウント）
+  // 3. 児童名ごとの実来館回数と来館日マップを作成（対象月の日数のみカウント・月またぎ対応）
   var visitCountMap = {};
   var visitDateMap = {};  // {児童名: {日付文字列: true}}
   formResponses.forEach(function(row) {
@@ -114,11 +123,16 @@ function allocateRemainingPoints_(year, month) {
     if (!childName) return;
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
-    var stayDays = calcStayDays_(checkIn, checkOut);
-    visitCountMap[childName] = (visitCountMap[childName] || 0) + stayDays;
     if (!visitDateMap[childName]) visitDateMap[childName] = {};
     expandStayToDates_(checkIn, checkOut).forEach(function(d) {
-      visitDateMap[childName][formatDateKey_(d)] = true;
+      // 対象月の日付のみカウント
+      if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
+        var dateKey = formatDateKey_(d);
+        if (!visitDateMap[childName][dateKey]) {
+          visitDateMap[childName][dateKey] = true;
+          visitCountMap[childName] = (visitCountMap[childName] || 0) + 1;
+        }
+      }
     });
   });
 
@@ -158,9 +172,12 @@ function allocateRemainingPoints_(year, month) {
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
     expandStayToDates_(checkIn, checkOut).forEach(function(d) {
-      var dateKey = formatDateKey_(d);
-      if (dailyVisitCounts[dateKey] !== undefined) {
-        dailyVisitCounts[dateKey]++;
+      // 対象月の日付のみカウント（月またぎ対応）
+      if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
+        var dateKey = formatDateKey_(d);
+        if (dailyVisitCounts[dateKey] !== undefined) {
+          dailyVisitCounts[dateKey]++;
+        }
       }
     });
   });

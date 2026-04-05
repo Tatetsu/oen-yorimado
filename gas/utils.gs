@@ -46,10 +46,10 @@ const MASTER_COL = {
   PRIORITY: 8,          // 重度支援区分（区分1〜区分5）
   ANNUAL_QUOTA: 9,      // 年間利用枠（例: 180）。空欄の場合は上限なし
   MONTHLY_QUOTA: 10,
-  ENROLLMENT: 11,
-  VISIT_DAYS: 12,
-  NON_VISIT_DAYS: 13,   // 非来館曜日
-  DEPARTURE_DATE: 14,   // 退所日
+  VISIT_DAYS: 11,       // 来館曜日
+  NON_VISIT_DAYS: 12,   // 非来館曜日
+  ENROLLMENT: 13,       // 入所状況（稼働/休止/退所）
+  DEPARTURE_STATUS: 14, // 退所状況（別施設移動/別施設移動無）
   MASTER_NOTES: 15,     // 備考
 };
 
@@ -155,8 +155,8 @@ var EMAIL_TEMPLATE = [
   '・{連絡事項}',
 ].join('\n');
 
-// 確定来館記録のデータ開始行（ヘッダーが1行目）
-const CONFIRMED_DATA_START_ROW = 2;
+// 確定来館記録のデータ開始行（1行目=操作エリア、2行目=ヘッダー）
+const CONFIRMED_DATA_START_ROW = 3;
 
 // 月別集計シートのデータ開始行（ヘッダーが2行目）
 const SUMMARY_DATA_START_ROW = 3;
@@ -197,8 +197,7 @@ function getActiveChildren() {
   const data = getChildMasterData();
   return data.filter(function(row) {
     var status = row[MASTER_COL.ENROLLMENT - 1];
-    var departureDate = row[MASTER_COL.DEPARTURE_DATE - 1];
-    return (status === '稼働' || status === '休止') && !departureDate;
+    return (status === '稼働' || status === '休止');
   });
 }
 
@@ -218,6 +217,7 @@ function getFormResponsesByYear(year) {
 
 /**
  * フォームの回答から指定年月のデータを取得する
+ * 入所日時〜退所日時の滞在期間が対象月と重なるレコードも返す（月またぎ連泊対応）
  * @param {number} year 年
  * @param {number} month 月（1-12）
  * @returns {Array<Array>} 該当月のフォーム回答データ
@@ -225,9 +225,24 @@ function getFormResponsesByYear(year) {
 function getFormResponsesByMonth(year, month) {
   const sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
   const data = sheet.getDataRange().getValues();
-  // ヘッダー行を除く
   var responses = data.slice(1);
+  var monthStart = new Date(year, month - 1, 1);
+  var monthEnd = new Date(year, month, 0); // 月末日
+
   return responses.filter(function(row) {
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+
+    // 入所日時がDate型の場合、滞在期間と対象月の重なりで判定
+    if (checkIn instanceof Date) {
+      var stayStart = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+      var stayEnd = (checkOut instanceof Date)
+        ? new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate())
+        : stayStart;
+      return stayStart <= monthEnd && stayEnd >= monthStart;
+    }
+
+    // フォールバック: 記録日で判定
     var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
     return recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month;
   });
@@ -339,6 +354,20 @@ function generateChildViewOptions() {
 }
 
 /**
+ * 確定来館記録用の選択肢を生成する
+ * すべて + 年全体オプション（YYYY年）+ 月オプション（1〜12月）
+ * @returns {Array<string>} 選択肢の配列
+ */
+function generateConfirmedVisitsOptions() {
+  var year = getTargetYearFromFormResponses_();
+  var options = ['すべて', year + '年'];
+  for (var m = 1; m <= 12; m++) {
+    options.push(year + '年' + m + '月');
+  }
+  return options;
+}
+
+/**
  * 児童名のドロップダウン選択肢を児童マスタから取得する
  * @returns {Array<string>} 児童名の配列
  */
@@ -388,10 +417,10 @@ function getConfirmedVisitsByMonth(year, month) {
     return [];
   }
   var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
+  if (data.length < CONFIRMED_DATA_START_ROW) {
     return [];
   }
-  var records = data.slice(1);
+  var records = data.slice(CONFIRMED_DATA_START_ROW - 1);
   return records.filter(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     return recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month;
@@ -412,10 +441,10 @@ function getConfirmedVisitsByYear(year) {
     return [];
   }
   var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
+  if (data.length < CONFIRMED_DATA_START_ROW) {
     return [];
   }
-  var records = data.slice(1);
+  var records = data.slice(CONFIRMED_DATA_START_ROW - 1);
   return records.filter(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     return recordDate.getFullYear() === year;
@@ -435,10 +464,10 @@ function getAllConfirmedVisits() {
     return [];
   }
   var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
+  if (data.length < CONFIRMED_DATA_START_ROW) {
     return [];
   }
-  return data.slice(1);
+  return data.slice(CONFIRMED_DATA_START_ROW - 1);
 }
 
 /**

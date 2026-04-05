@@ -95,18 +95,30 @@ function setupMonthlySummarySheet_(ss) {
 function setupConfirmedVisitsSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.CONFIRMED_VISITS);
 
-  // ヘッダー行
+  // 操作エリア（1行目）
+  sheet.getRange('A1').setValue('対象年月:');
+  sheet.getRange('A1').setFontWeight('bold');
+
+  // 年月ドロップダウン（B1）
+  var confirmedOptions = generateConfirmedVisitsOptions();
+  var confirmedRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(confirmedOptions, true)
+    .build();
+  sheet.getRange('B1').setDataValidation(confirmedRule);
+  sheet.getRange('B1').setValue('すべて');
+
+  // ヘッダー行（2行目）
   var headers = ['記録日', '児童名', 'データ区分', 'スタッフ1', 'スタッフ2', '入所日時', '退所日時', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
 
   // ヘッダー書式設定
-  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  var headerRange = sheet.getRange(2, 1, 1, headers.length);
   headerRange.setBackground('#4285F4');
   headerRange.setFontColor('#FFFFFF');
   headerRange.setFontWeight('bold');
 
-  // 行固定
-  sheet.setFrozenRows(1);
+  // 行固定（操作エリア+ヘッダー）
+  sheet.setFrozenRows(2);
 
   // 列幅調整
   sheet.setColumnWidth(1, 100);  // 記録日

@@ -138,6 +138,8 @@ function onEdit(e) {
         updateVisitCalendar();
       } else if (sheetName === SHEET_NAMES.MONTHLY_SUMMARY) {
         updateMonthlySummary();
+      } else if (sheetName === SHEET_NAMES.CONFIRMED_VISITS) {
+        filterConfirmedVisits_();
       }
     }
   } catch (error) {
@@ -235,6 +237,14 @@ function refreshDropdowns() {
       .build();
     var calendarSheet = getSheet(SHEET_NAMES.VISIT_CALENDAR);
     calendarSheet.getRange('B1').setDataValidation(calendarRule);
+
+    // 確定来館記録の年月ドロップダウン更新
+    var confirmedOptions = generateConfirmedVisitsOptions();
+    var confirmedRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(confirmedOptions, true)
+      .build();
+    var confirmedSheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+    confirmedSheet.getRange('B1').setDataValidation(confirmedRule);
 
     // Googleフォームの児童名プルダウン更新
     updateFormChildNameDropdown_(childNames);
@@ -335,6 +345,57 @@ function setupMonthlyProcessTrigger() {
 
   Logger.log('月次一括処理トリガーを設定しました');
   SpreadsheetApp.getUi().alert('月次一括処理トリガーを設定しました（毎月1日 午前3時）');
+}
+
+/**
+ * 確定来館記録シートの年月フィルタを適用する
+ * B1セルの値に基づいて行の表示/非表示を切り替える
+ */
+function filterConfirmedVisits_() {
+  var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
+  var value = sheet.getRange('B1').getValue();
+  var lastRow = sheet.getLastRow();
+
+  if (lastRow < CONFIRMED_DATA_START_ROW) return;
+
+  var numDataRows = lastRow - CONFIRMED_DATA_START_ROW + 1;
+
+  // まず全データ行を表示
+  sheet.showRows(CONFIRMED_DATA_START_ROW, numDataRows);
+
+  if (!value || value === 'すべて') return;
+
+  var yearOnly = parseYearOnly_(String(value).trim());
+  var ym = yearOnly ? null : parseYearMonth(value);
+
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numDataRows, 1).getValues();
+
+  // 連続する非表示行をバッチで処理（高速化）
+  var hideStart = -1;
+  var hideCount = 0;
+
+  for (var i = 0; i <= data.length; i++) {
+    var shouldHide = false;
+    if (i < data.length && data[i][0]) {
+      var recordDate = new Date(data[i][0]);
+      if (yearOnly) {
+        shouldHide = recordDate.getFullYear() !== yearOnly;
+      } else if (ym) {
+        shouldHide = recordDate.getFullYear() !== ym.year || (recordDate.getMonth() + 1) !== ym.month;
+      }
+    }
+
+    if (shouldHide) {
+      if (hideStart === -1) hideStart = i;
+      hideCount++;
+    } else {
+      if (hideCount > 0) {
+        sheet.hideRows(CONFIRMED_DATA_START_ROW + hideStart, hideCount);
+        hideStart = -1;
+        hideCount = 0;
+      }
+    }
+  }
 }
 
 /**

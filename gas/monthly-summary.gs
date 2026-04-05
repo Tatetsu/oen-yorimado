@@ -38,7 +38,7 @@ function updateMonthlySummary() {
 
     // フォームの回答（実記録）から該当月データ取得して集計
     var formResponses = getFormResponsesByMonth(ym.year, ym.month);
-    var visitCounts = countVisitsByFormResponses_(formResponses);
+    var visitCounts = countVisitsByFormResponses_(formResponses, ym.year, ym.month);
 
     // データエリアをクリア（ヘッダーは残す）
     var lastRow = sheet.getLastRow();
@@ -149,18 +149,36 @@ function updateAnnualSummary_(sheet, year) {
 /**
  * フォームの回答データから児童名ごとの来館回数を集計する
  * （実記録のみカウント。振り分けは含まない）
+ * 年月指定がある場合、対象月に含まれる日数のみカウントする（月またぎ連泊対応）
  * @param {Array<Array>} formResponses フォームの回答データ
+ * @param {number} [year] 対象年（省略時は全日数カウント）
+ * @param {number} [month] 対象月 1-12（省略時は全日数カウント）
  * @returns {Object} {児童名: 回数}
  */
-function countVisitsByFormResponses_(formResponses) {
+function countVisitsByFormResponses_(formResponses, year, month) {
   var counts = {};
+  var filterByMonth = (year !== undefined && month !== undefined);
+
   formResponses.forEach(function(row) {
     var childName = row[FORM_COL.CHILD_NAME - 1];
     if (!childName) return;
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
-    var days = calcStayDays_(checkIn, checkOut);
-    counts[childName] = (counts[childName] || 0) + days;
+
+    if (filterByMonth) {
+      // 対象月に含まれる日数のみカウント
+      var stayDates = expandStayToDates_(checkIn, checkOut);
+      var daysInMonth = 0;
+      stayDates.forEach(function(d) {
+        if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
+          daysInMonth++;
+        }
+      });
+      counts[childName] = (counts[childName] || 0) + daysInMonth;
+    } else {
+      var days = calcStayDays_(checkIn, checkOut);
+      counts[childName] = (counts[childName] || 0) + days;
+    }
   });
   return counts;
 }
