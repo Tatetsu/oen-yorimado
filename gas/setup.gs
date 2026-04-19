@@ -195,9 +195,8 @@ function setupChildViewSheet_(ss) {
     .requireValueInList(childViewOptions, true)
     .build();
   sheet.getRange('B2').setDataValidation(yearMonthRule);
-  // 対象年の1月をデフォルトに設定
-  var cvYear = getTargetYearFromFormResponses_();
-  sheet.getRange('B2').setValue(cvYear + '年1月');
+  // デフォルトは全期間表示（児童名を選ぶだけで全データ表示）
+  sheet.getRange('B2').setValue('すべて');
 
   // 基本情報エリアのラベル（4〜8行目）
   sheet.getRange('A4').setValue('保護者名:');

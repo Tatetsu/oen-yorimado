@@ -17,11 +17,10 @@ function updateChildView() {
     var yearMonthStr = sheet.getRange('B2').getValue();
 
     if (!childName) {
-      SpreadsheetApp.getUi().alert('児童名を選択してください');
+      Logger.log('児童別ビュー: 児童名が未選択です');
       return;
     }
 
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
     ss.toast('児童別ビューを更新中...', '読み込み中', -1);
 
     var isAllPeriod = (!yearMonthStr || yearMonthStr === 'すべて');
@@ -46,7 +45,7 @@ function updateChildView() {
     Logger.log('児童別ビューを更新しました: ' + childName + ' ' + label);
   } catch (error) {
     logError_('updateChildView', error);
-    SpreadsheetApp.getUi().alert('エラーが発生しました: ' + error.message);
+    ss.toast('エラー: ' + error.message, 'エラー', 5);
   } finally {
     originalSheet.activate();
   }
@@ -73,7 +72,7 @@ function writeChildBasicInfo_(sheet, childName, year, month) {
 
   if (!childRow) {
     Logger.log('児童マスタに該当児童が見つかりません: ' + childName);
-    SpreadsheetApp.getUi().alert('児童「' + childName + '」が児童マスタに見つかりません');
+    sheet.getRange('B4').setValue('（児童マスタに未登録）');
     return;
   }
 
@@ -110,7 +109,7 @@ function writeChildBasicInfoAll_(sheet, childName) {
 
   if (!childRow) {
     Logger.log('児童マスタに該当児童が見つかりません: ' + childName);
-    SpreadsheetApp.getUi().alert('児童「' + childName + '」が児童マスタに見つかりません');
+    sheet.getRange('B4').setValue('（児童マスタに未登録）');
     return;
   }
 
@@ -194,7 +193,7 @@ function writeChildBasicInfoYear_(sheet, childName, year) {
 
   if (!childRow) {
     Logger.log('児童マスタに該当児童が見つかりません: ' + childName);
-    SpreadsheetApp.getUi().alert('児童「' + childName + '」が児童マスタに見つかりません');
+    sheet.getRange('B4').setValue('（児童マスタに未登録）');
     return;
   }
 

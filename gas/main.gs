@@ -16,6 +16,8 @@ function onOpen() {
     .addItem('ドロップダウンを更新', 'refreshDropdowns')
     .addItem('児童マスタ ドロップダウン設定', 'refreshChildMasterValidations')
     .addSeparator()
+    .addItem('確定来館記録（Webビュー）を開く', 'openWebView')
+    .addSeparator()
     .addItem('バウンスメールを確認', 'collectBounceEmailsManual')
     .addToUi();
 }
@@ -395,6 +397,29 @@ function filterConfirmedVisits_() {
         hideCount = 0;
       }
     }
+  }
+}
+
+/**
+ * 確定来館記録のWebビューをブラウザで開く
+ * 事前にWebアプリとしてデプロイが必要
+ */
+function openWebView() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var url = ScriptApp.getService().getUrl();
+    if (!url) {
+      ui.alert('WebビューのURLが取得できません。\n\n「デプロイ > デプロイを管理」からWebアプリとしてデプロイしてください。');
+      return;
+    }
+    var html = HtmlService.createHtmlOutput(
+      '<p style="font-family:sans-serif;font-size:14px">以下のURLをブラウザで開いてください：</p>'
+      + '<p><a href="' + url + '" target="_blank" style="font-size:13px;word-break:break-all">' + url + '</a></p>'
+      + '<p style="font-size:12px;color:#888;margin-top:12px">このウィンドウは閉じて構いません。</p>'
+    ).setWidth(480).setHeight(120);
+    ui.showModelessDialog(html, '確定来館記録 Webビュー');
+  } catch (e) {
+    ui.alert('エラー: ' + e.message + '\n\nWebアプリとしてデプロイされているか確認してください。');
   }
 }
 
