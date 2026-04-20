@@ -2,10 +2,14 @@
  * 共通ユーティリティ（定数・ヘルパー関数）
  */
 
+// スタッフ用_回答シートのスプレッドシートID（メール送信済フラグ書き込み先）
+const STAFF_SHEET_ID = '1vj9pU6IMSkQmV7L6aNhKxFaPzj55p2NmO1wOnyaaywc';
+
 // シート名
 const SHEET_NAMES = {
   FORM_RESPONSE: 'フォームの回答',
   CHILD_MASTER: '児童マスタ',
+  STAFF_MASTER: 'スタッフマスタ',
   MONTHLY_SUMMARY: '月別集計',
   VISIT_CALENDAR: '来館カレンダー',
   CONFIRMED_VISITS: '確定来館記録',
@@ -15,7 +19,7 @@ const SHEET_NAMES = {
   BOUNCE_LOG: 'バウンスログ',
 };
 
-// 設定シートの行インデックス（C列=デフォルト値）
+// 設定シートの行インデックス（C列=デフォルト値）。実シートの並びに合わせる
 const SETTINGS_ROW = {
   MAX_VISITS_PER_DAY: 2,  // 1日最大来館数
   CHECK_IN: 3,            // 入所時間
@@ -28,10 +32,10 @@ const SETTINGS_ROW = {
   BOWEL: 10,              // 便
   MEDICINE: 11,           // 服薬
   NOTES: 12,              // 連絡事項
-  ERROR_EMAIL: 13,        // エラー通知先メール
-  EMAIL_SUBJECT: 14,      // メール件名
-  EMAIL_BODY: 15,         // メール本文
-  DUMMY_STAFF_NAME: 16,   // 固定スタッフ名（振り分け・スタッフ2補完用）
+  DUMMY_STAFF_NAME: 13,   // 固定スタッフ（振り分け・スタッフ2補完用）
+  ERROR_EMAIL: 14,        // エラー通知先メール
+  EMAIL_SUBJECT: 15,      // メール件名
+  EMAIL_BODY: 16,         // メール本文
 };
 
 // 児童マスタの列インデックス（1始まり）
@@ -52,6 +56,9 @@ const MASTER_COL = {
   DEPARTURE_STATUS: 14, // 退所状況（別施設移動/別施設移動無）
   MASTER_NOTES: 15,     // 備考
 };
+
+// フォームの回答シートのデータ開始行（1行目=ヘッダー）
+const FORM_DATA_START_ROW = 2;
 
 // フォームの回答の列インデックス（1始まり）
 const FORM_COL = {
@@ -93,10 +100,10 @@ const CALENDAR_LAYOUT = {
   CHILD_START_COL: 3,  // 児童列の開始
 };
 
-// 振り分け補完用デフォルト値
+// 振り分け補完用デフォルト値（設定シート未設定時のフォールバック）
 const ALLOCATION_DEFAULTS = {
-  CHECK_IN: '09:00',
-  CHECK_OUT: '17:00',
+  CHECK_IN: '17:00',
+  CHECK_OUT: '08:00',
   TEMPERATURE: 36.5,
   MEAL: '○',
   BATH: '○',
@@ -155,11 +162,13 @@ var EMAIL_TEMPLATE = [
   '・{連絡事項}',
 ].join('\n');
 
-// 確定来館記録のデータ開始行（1行目=操作エリア、2行目=ヘッダー）
-const CONFIRMED_DATA_START_ROW = 3;
+// 確定来館記録のレイアウト定数（1行目=年、2行目=月、3行目=ヘッダー、4行目〜=データ）
+const CONFIRMED_HEADER_ROW = 3;
+const CONFIRMED_DATA_START_ROW = 4;
 
-// 月別集計シートのデータ開始行（ヘッダーが2行目）
-const SUMMARY_DATA_START_ROW = 3;
+// 月別集計のレイアウト定数（1行目=年、2行目=月、3行目=ヘッダー、4行目〜=データ）
+const SUMMARY_HEADER_ROW = 3;
+const SUMMARY_DATA_START_ROW = 4;
 
 // 児童別ビューの来館履歴開始行
 const CHILD_VIEW_HISTORY_START_ROW = 10;
@@ -298,73 +307,110 @@ function getTargetYearFromFormResponses_() {
 }
 
 /**
- * 年月ドロップダウン用の選択肢を生成する
- * フォームの回答から対象年を取得し、1月〜12月を昇順で返す
- * @returns {Array<string>} 年月文字列の配列
+ * フォームの回答から対象年のリストを降順で取得する
+ * データがない場合は現在の年1件のみを返す
+ * @returns {Array<number>} 年の配列（降順）
  */
-function generateYearMonthOptions() {
-  var year = getTargetYearFromFormResponses_();
-  var options = [];
-  for (var m = 1; m <= 12; m++) {
-    options.push(year + '年' + m + '月');
-  }
+function collectYearsFromFormResponses_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.FORM_RESPONSE);
+  if (!sheet) return [new Date().getFullYear()];
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [new Date().getFullYear()];
+  var yearsSet = {};
+  data.slice(1).forEach(function(row) {
+    var d = new Date(row[FORM_COL.RECORD_DATE - 1]);
+    if (!isNaN(d.getTime())) yearsSet[d.getFullYear()] = true;
+  });
+  var years = Object.keys(yearsSet).map(Number);
+  if (years.length === 0) return [new Date().getFullYear()];
+  return years.sort(function(a, b) { return b - a; });
+}
+
+/**
+ * 年ドロップダウンの選択肢を生成する
+ * @returns {Array<string>} ["すべて", "2026年", "2025年", ...]
+ */
+function generateYearOptions() {
+  var years = collectYearsFromFormResponses_();
+  return ['すべて'].concat(years.map(function(y) { return y + '年'; }));
+}
+
+/**
+ * 月ドロップダウンの選択肢を生成する
+ * @returns {Array<string>} ["すべて", "1月", ..., "12月"]
+ */
+function generateMonthOptions() {
+  var options = ['すべて'];
+  for (var m = 1; m <= 12; m++) options.push(m + '月');
   return options;
 }
 
 /**
- * 月別集計用の選択肢を生成する
- * 年全体オプション（YYYY年）+ 月オプション（1〜12月）
- * @returns {Array<string>} 選択肢の配列
+ * 年ドロップダウン値をパースする
+ * @param {*} str 値（"すべて"・"2026年"・Date等）
+ * @returns {number|null} 年（「すべて」または不正値は null）
  */
-function generateMonthlySummaryOptions() {
-  var year = getTargetYearFromFormResponses_();
-  var options = [year + '年'];
-  for (var m = 1; m <= 12; m++) {
-    options.push(year + '年' + m + '月');
-  }
-  return options;
+function parseYearOption_(str) {
+  if (!str || str === 'すべて') return null;
+  if (str instanceof Date) return str.getFullYear();
+  var match = String(str).match(/^(\d{4})年$/);
+  return match ? parseInt(match[1], 10) : null;
 }
 
 /**
- * 来館カレンダー用の選択肢を生成する
- * 年全体オプション（YYYY年）+ 月オプション（1〜12月）
- * @returns {Array<string>} 選択肢の配列
+ * 月ドロップダウン値をパースする
+ * @param {*} str 値（"すべて"・"3月"等）
+ * @returns {number|null} 月（1-12、「すべて」は null）
  */
-function generateCalendarOptions() {
-  var year = getTargetYearFromFormResponses_();
-  var options = [year + '年'];
-  for (var m = 1; m <= 12; m++) {
-    options.push(year + '年' + m + '月');
-  }
-  return options;
+function parseMonthOption_(str) {
+  if (!str || str === 'すべて') return null;
+  var match = String(str).match(/^(\d{1,2})月$/);
+  return match ? parseInt(match[1], 10) : null;
 }
 
 /**
- * 児童別ビュー用の選択肢を生成する
- * すべて・年全体（YYYY年）+ 月オプション（1〜12月）
- * @returns {Array<string>} 選択肢の配列
+ * 年・月ドロップダウン値から期間スコープを構築する
+ * @param {*} yearStr B1の値
+ * @param {*} monthStr B2の値
+ * @returns {{type: string, year?: number, month?: number}}
  */
-function generateChildViewOptions() {
-  var year = getTargetYearFromFormResponses_();
-  var options = ['すべて', year + '年'];
-  for (var m = 1; m <= 12; m++) {
-    options.push(year + '年' + m + '月');
-  }
-  return options;
+function buildScope_(yearStr, monthStr) {
+  var year = parseYearOption_(yearStr);
+  var month = parseMonthOption_(monthStr);
+  if (year !== null && month !== null) return { type: 'month', year: year, month: month };
+  if (year !== null) return { type: 'year', year: year };
+  if (month !== null) return { type: 'month_all_years', month: month };
+  return { type: 'all' };
 }
 
 /**
- * 確定来館記録用の選択肢を生成する
- * すべて + 年全体オプション（YYYY年）+ 月オプション（1〜12月）
- * @returns {Array<string>} 選択肢の配列
+ * ログ・メッセージ用にスコープを文字列化する
  */
-function generateConfirmedVisitsOptions() {
-  var year = getTargetYearFromFormResponses_();
-  var options = ['すべて', year + '年'];
-  for (var m = 1; m <= 12; m++) {
-    options.push(year + '年' + m + '月');
+function describeScope_(scope) {
+  if (scope.type === 'month') return scope.year + '年' + scope.month + '月';
+  if (scope.type === 'year') return scope.year + '年';
+  if (scope.type === 'month_all_years') return '全期間の' + scope.month + '月';
+  return '全期間';
+}
+
+/**
+ * Dateが期間スコープに含まれるか判定する
+ * @param {Date} date 判定対象の日付
+ * @param {{type: string, year?: number, month?: number}} scope
+ * @returns {boolean}
+ */
+function matchesScope_(date, scope) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) return false;
+  if (scope.type === 'month') {
+    return date.getFullYear() === scope.year && (date.getMonth() + 1) === scope.month;
   }
-  return options;
+  if (scope.type === 'year') {
+    return date.getFullYear() === scope.year;
+  }
+  if (scope.type === 'month_all_years') {
+    return (date.getMonth() + 1) === scope.month;
+  }
+  return true; // all
 }
 
 /**
@@ -448,6 +494,19 @@ function getConfirmedVisitsByYear(year) {
   return records.filter(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     return recordDate.getFullYear() === year;
+  });
+}
+
+/**
+ * 確定来館記録からスコープに合致するデータを取得する
+ * @param {{type: string, year?: number, month?: number}} scope
+ * @returns {Array<Array>} 該当する確定来館記録データ
+ */
+function getConfirmedVisitsByScope(scope) {
+  var all = getAllConfirmedVisits();
+  if (scope.type === 'all') return all;
+  return all.filter(function(row) {
+    return matchesScope_(new Date(row[CONFIRMED_COL.RECORD_DATE - 1]), scope);
   });
 }
 
@@ -563,22 +622,34 @@ function countWeekdaysInMonth_(year, month) {
 }
 
 /**
- * "YYYY年" 形式から年を抽出する（"YYYY年M月" にはマッチしない）
- * @param {string} str 入力文字列
- * @returns {number|null} 年（マッチしない場合null）
- */
-function parseYearOnly_(str) {
-  if (!str || str instanceof Date) return null;
-  var match = String(str).match(/^(\d{4})年$/);
-  return match ? parseInt(match[1], 10) : null;
-}
-
-/**
  * 設定シートから固定スタッフ名を取得する（振り分け・スタッフ2補完用）
  * @returns {string} 固定スタッフ名（未設定の場合は空文字）
  */
 function getDummyStaffName_() {
   return String(getSettingValue_(SETTINGS_ROW.DUMMY_STAFF_NAME) || '');
+}
+
+/**
+ * 振り分け補完値を設定シートから取得する
+ * 設定シート未設定の項目は ALLOCATION_DEFAULTS にフォールバックする
+ * @returns {Object} 補完値オブジェクト
+ */
+function getAllocationDefaultsFromSettings_() {
+  function pick(row, fallback) {
+    var v = getSettingValue_(row);
+    return (v === null || v === '' || typeof v === 'undefined') ? fallback : v;
+  }
+  return {
+    CHECK_IN: pick(SETTINGS_ROW.CHECK_IN, ALLOCATION_DEFAULTS.CHECK_IN),
+    CHECK_OUT: pick(SETTINGS_ROW.CHECK_OUT, ALLOCATION_DEFAULTS.CHECK_OUT),
+    TEMPERATURE: pick(SETTINGS_ROW.TEMPERATURE, ALLOCATION_DEFAULTS.TEMPERATURE),
+    MEAL: pick(SETTINGS_ROW.MEAL, ALLOCATION_DEFAULTS.MEAL),
+    BATH: pick(SETTINGS_ROW.BATH, ALLOCATION_DEFAULTS.BATH),
+    SLEEP: pick(SETTINGS_ROW.SLEEP, ALLOCATION_DEFAULTS.SLEEP),
+    BOWEL: pick(SETTINGS_ROW.BOWEL, ALLOCATION_DEFAULTS.BOWEL),
+    MEDICINE: pick(SETTINGS_ROW.MEDICINE, ALLOCATION_DEFAULTS.MEDICINE),
+    NOTES: pick(SETTINGS_ROW.NOTES, ALLOCATION_DEFAULTS.NOTES),
+  };
 }
 
 /**

@@ -1,16 +1,10 @@
 /**
  * GAS Webビュー: フォームの回答 閲覧・編集
- * Googleフォーム誤送信の修正・削除に対応（追加は行わない）
+ * フォーム誤送信の修正・削除に対応（追加は行わない）
  */
 
-// フォームの回答のデータ開始行（1行目=ヘッダー）
-var FORM_DATA_START_ROW = 2;
-
-/**
- * Webアプリのエントリポイント
- */
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('web-view')
+  return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('フォーム回答の修正 | 来館管理')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
@@ -20,12 +14,15 @@ function doGet() {
  */
 function getInitialDataWeb() {
   var years = {};
+  var childNames = {};
   try {
     var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
     var data = sheet.getDataRange().getValues();
     data.slice(FORM_DATA_START_ROW - 1).forEach(function(row) {
       var d = new Date(row[FORM_COL.RECORD_DATE - 1]);
       if (!isNaN(d.getTime())) years[d.getFullYear()] = true;
+      var name = String(row[FORM_COL.CHILD_NAME - 1] || '').trim();
+      if (name) childNames[name] = true;
     });
   } catch (e) {
     logError_('getInitialDataWeb', e);
@@ -36,15 +33,12 @@ function getInitialDataWeb() {
 
   return {
     years: yearList,
-    children: getAllChildNameOptions(),
+    children: Object.keys(childNames).sort(),
   };
 }
 
 /**
  * フォームの回答データを取得する（行番号付き）
- * @param {'year'|'month'} mode 表示モード
- * @param {number} year 年
- * @param {number|null} month 月（modeが'month'の場合のみ）
  */
 function getFormResponsesWeb(mode, year, month) {
   var sheet;
@@ -114,9 +108,7 @@ function formatDtInput_(val, tz) {
 }
 
 /**
- * フォームの回答の1行を更新し、確定来館記録を再生成する
- * @param {number} rowIndex シート行番号（1始まり）
- * @param {Object} data 更新データ
+ * フォームの回答の1行を更新する
  */
 function updateFormResponseWeb(rowIndex, data) {
   try {
@@ -126,21 +118,20 @@ function updateFormResponseWeb(rowIndex, data) {
     var checkIn = data.checkInInput ? new Date(data.checkInInput) : '';
     var checkOut = data.checkOutInput ? new Date(data.checkOutInput) : '';
 
-    // タイムスタンプ列(A)は変更しない。B列以降を更新
     var values = [[
-      recordDate,                                                       // B: 記録日
-      data.staffName,                                                   // C: スタッフ1
-      data.staffName2 || '',                                            // D: スタッフ2
-      data.childName,                                                   // E: 児童名
-      checkIn,                                                          // F: 入所日時
-      checkOut,                                                         // G: 退所日時
-      (data.temperature !== '' && data.temperature !== null) ? parseFloat(data.temperature) : '', // H: 体温
-      data.meal,                                                        // I: 食事
-      data.bath,                                                        // J: 入浴
-      data.sleep,                                                       // K: 睡眠
-      data.bowel,                                                       // L: 便
-      data.medicine,                                                    // M: 服薬
-      data.notes || '',                                                 // N: 連絡事項
+      recordDate,
+      data.staffName,
+      data.staffName2 || '',
+      data.childName,
+      checkIn,
+      checkOut,
+      (data.temperature !== '' && data.temperature !== null) ? parseFloat(data.temperature) : '',
+      data.meal,
+      data.bath,
+      data.sleep,
+      data.bowel,
+      data.medicine,
+      data.notes || '',
     ]];
 
     sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, 13).setValues(values);
@@ -148,10 +139,6 @@ function updateFormResponseWeb(rowIndex, data) {
     if (checkIn instanceof Date) {
       sheet.getRange(rowIndex, FORM_COL.CHECK_IN, 1, 2).setNumberFormat('yyyy/mm/dd H:mm');
     }
-
-    // 確定来館記録を対象月で再生成
-    var ym = { year: recordDate.getFullYear(), month: recordDate.getMonth() + 1 };
-    updateConfirmedVisits(ym.year, ym.month);
 
     return { success: true };
   } catch (e) {
@@ -161,19 +148,12 @@ function updateFormResponseWeb(rowIndex, data) {
 }
 
 /**
- * フォームの回答の1行を削除し、確定来館記録を再生成する
- * @param {number} rowIndex シート行番号（1始まり）
- * @param {string} recordDateInput 記録日（"yyyy-MM-dd"）再生成対象月の特定に使用
+ * フォームの回答の1行を削除する
  */
-function deleteFormResponseWeb(rowIndex, recordDateInput) {
+function deleteFormResponseWeb(rowIndex) {
   try {
     var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
-    var recordDate = new Date(recordDateInput);
     sheet.deleteRow(rowIndex);
-
-    // 確定来館記録を対象月で再生成
-    updateConfirmedVisits(recordDate.getFullYear(), recordDate.getMonth() + 1);
-
     return { success: true };
   } catch (e) {
     logError_('deleteFormResponseWeb', e);

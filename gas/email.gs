@@ -102,8 +102,9 @@ function sendVisitReportsByDate_(targetDate) {
     return '対象日（' + targetDateStr + '）の来館記録がありません。';
   }
 
-  // フォームの回答シート参照（送信済フラグ書き込み用）
-  var formSheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
+  // スタッフ用_回答シートへの参照（送信済フラグ書き込み用）
+  var staffSs = SpreadsheetApp.openById(STAFF_SHEET_ID);
+  var formSheet = staffSs.getSheetByName(SHEET_NAMES.FORM_RESPONSE);
 
   // ヘッダーにメール送信済列がなければ設定
   var headerValue = formSheet.getRange(1, FORM_COL.EMAIL_SENT).getValue();

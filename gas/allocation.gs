@@ -6,19 +6,20 @@
 
 /**
  * 振り分けを手動実行する（F-06）
- * 月別集計シートのB1セル（対象年月）を参照して振り分けを実行する
+ * 月別集計シートのB1=対象年、B2=対象月を参照して振り分けを実行する
  */
 function runAllocationManual() {
   var ui = SpreadsheetApp.getUi();
 
   try {
     var sheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
-    var yearMonthStr = sheet.getRange('B1').getValue();
-    if (!yearMonthStr) {
-      ui.alert('月別集計シートの対象年月を選択してください');
+    var year = parseYearOption_(sheet.getRange('B1').getValue());
+    var month = parseMonthOption_(sheet.getRange('B2').getValue());
+    if (year === null || month === null) {
+      ui.alert('月別集計シートの対象年・対象月を具体的に選択してください（「すべて」は不可）');
       return;
     }
-    var ym = parseYearMonth(yearMonthStr);
+    var ym = { year: year, month: month };
 
     // 既に振り分け済みかチェック
     if (hasAllocationsForMonth_(ym.year, ym.month)) {
@@ -275,14 +276,21 @@ function allocateRemainingPoints_(year, month) {
 
         // 振り分け確定 → 確定来館記録の形式で追加
         var defaults = childDefaultsMap[childName];
+        var checkInDT = toDateTimeOnDate_(selectedDate, defaults.checkIn);
+        var checkOutDT = toDateTimeOnDate_(selectedDate, defaults.checkOut);
+        // 退所時刻が入所時刻以前なら翌日扱い（例: 17:00入所 → 翌8:00退所）
+        if (checkOutDT.getTime() <= checkInDT.getTime()) {
+          checkOutDT = new Date(checkOutDT.getTime() + 24 * 60 * 60 * 1000);
+        }
+
         allocationResults.push([
           selectedDate,           // 記録日
           childName,              // 児童名
           '振り分け',              // データ区分
           defaults.staffName,     // スタッフ1（固定スタッフ）
           defaults.staffName2,    // スタッフ2（固定スタッフ）
-          defaults.checkIn,       // 入所時間
-          defaults.checkOut,      // 退所時間
+          checkInDT,              // 入所日時（selectedDate + 時刻）
+          checkOutDT,             // 退所日時（selectedDate + 時刻、必要に応じて翌日）
           defaults.temperature,   // 体温
           defaults.meal,          // 食事
           defaults.bath,          // 入浴
@@ -465,6 +473,27 @@ function parseVisitDays_(visitDayStr) {
 }
 
 /**
+ * 基準日と時刻値から datetime の Date オブジェクトを組み立てる
+ * - timeVal が Date の場合: その時:分を基準日に適用
+ * - timeVal が "HH:mm" 文字列の場合: パースして基準日に適用
+ * @param {Date} date 基準日
+ * @param {Date|string} timeVal 時刻値
+ * @returns {Date} 基準日 + 時刻 の Date
+ */
+function toDateTimeOnDate_(date, timeVal) {
+  var result = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  if (timeVal instanceof Date) {
+    result.setHours(timeVal.getHours(), timeVal.getMinutes(), 0, 0);
+    return result;
+  }
+  var parts = String(timeVal || '').split(':');
+  var hh = parseInt(parts[0], 10);
+  var mm = parseInt(parts[1], 10);
+  result.setHours(isNaN(hh) ? 0 : hh, isNaN(mm) ? 0 : mm, 0, 0);
+  return result;
+}
+
+/**
  * 日付をYYYY-MM-DD形式の文字列に変換する（比較用キー）
  * @param {Date} date 日付
  * @returns {string} YYYY-MM-DD形式
@@ -488,40 +517,42 @@ function computeChildDefaults_(childName, masterRow, formResponses) {
   var staffName = getDummyStaffName_();
   var staffName2 = '';
 
+  // 設定シートの補完値を取得（未設定項目は ALLOCATION_DEFAULTS にフォールバック）
+  var settings = getAllocationDefaultsFromSettings_();
+
   // 同じ児童の実データを抽出
   var childData = formResponses.filter(function(row) {
     return row[FORM_COL.CHILD_NAME - 1] === childName;
   });
 
-  // 実データがある場合は最頻値を算出
+  // 実データがある場合は最頻値を算出、なければ設定シート値を使用
   if (childData.length > 0) {
     return {
       staffName: staffName,
       staffName2: staffName2,
-      checkIn: getModeValue_(childData, FORM_COL.CHECK_IN - 1, ALLOCATION_DEFAULTS.CHECK_IN),
-      checkOut: getModeValue_(childData, FORM_COL.CHECK_OUT - 1, ALLOCATION_DEFAULTS.CHECK_OUT),
-      temperature: getModeNumeric_(childData, FORM_COL.TEMPERATURE - 1, ALLOCATION_DEFAULTS.TEMPERATURE),
-      meal: getModeValue_(childData, FORM_COL.MEAL - 1, ALLOCATION_DEFAULTS.MEAL),
-      bath: getModeValue_(childData, FORM_COL.BATH - 1, ALLOCATION_DEFAULTS.BATH),
-      sleep: getModeValue_(childData, FORM_COL.SLEEP - 1, ALLOCATION_DEFAULTS.SLEEP),
-      bowel: getModeValue_(childData, FORM_COL.BOWEL - 1, ALLOCATION_DEFAULTS.BOWEL),
-      medicine: getModeValue_(childData, FORM_COL.MEDICINE - 1, ALLOCATION_DEFAULTS.MEDICINE),
+      checkIn: getModeValue_(childData, FORM_COL.CHECK_IN - 1, settings.CHECK_IN),
+      checkOut: getModeValue_(childData, FORM_COL.CHECK_OUT - 1, settings.CHECK_OUT),
+      temperature: getModeNumeric_(childData, FORM_COL.TEMPERATURE - 1, settings.TEMPERATURE),
+      meal: getModeValue_(childData, FORM_COL.MEAL - 1, settings.MEAL),
+      bath: getModeValue_(childData, FORM_COL.BATH - 1, settings.BATH),
+      sleep: getModeValue_(childData, FORM_COL.SLEEP - 1, settings.SLEEP),
+      bowel: getModeValue_(childData, FORM_COL.BOWEL - 1, settings.BOWEL),
+      medicine: getModeValue_(childData, FORM_COL.MEDICINE - 1, settings.MEDICINE),
       notes: pickRandomNote_(childName, childData, formResponses),
     };
   }
 
-  // 実データがない場合はデフォルト値を使用
   return {
     staffName: staffName,
     staffName2: staffName2,
-    checkIn: ALLOCATION_DEFAULTS.CHECK_IN,
-    checkOut: ALLOCATION_DEFAULTS.CHECK_OUT,
-    temperature: ALLOCATION_DEFAULTS.TEMPERATURE,
-    meal: ALLOCATION_DEFAULTS.MEAL,
-    bath: ALLOCATION_DEFAULTS.BATH,
-    sleep: ALLOCATION_DEFAULTS.SLEEP,
-    bowel: ALLOCATION_DEFAULTS.BOWEL,
-    medicine: ALLOCATION_DEFAULTS.MEDICINE,
+    checkIn: settings.CHECK_IN,
+    checkOut: settings.CHECK_OUT,
+    temperature: settings.TEMPERATURE,
+    meal: settings.MEAL,
+    bath: settings.BATH,
+    sleep: settings.SLEEP,
+    bowel: settings.BOWEL,
+    medicine: settings.MEDICINE,
     notes: pickRandomNote_(childName, [], formResponses),
   };
 }
@@ -614,7 +645,9 @@ function pickRandomNote_(childName, childData, allData) {
     return allNotes[Math.floor(Math.random() * allNotes.length)];
   }
 
-  return ALLOCATION_DEFAULTS.NOTES;
+  // 設定シートの「連絡事項」値にフォールバック
+  var settingNote = getSettingValue_(SETTINGS_ROW.NOTES);
+  return settingNote ? String(settingNote) : ALLOCATION_DEFAULTS.NOTES;
 }
 
 /**

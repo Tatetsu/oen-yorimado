@@ -1,90 +1,27 @@
 /**
  * F-02: 月別集計更新
  * フォームの回答（実記録）から集計し、月別集計シートに値を書き込む
+ * B1=対象年、B2=対象月 の組み合わせでスコープを決定する
  */
 
 /**
  * 月別集計を更新する（メイン処理）
- * 月別集計シートのB1セル（対象年月）を参照して集計する
  */
 function updateMonthlySummary() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var originalSheet = ss.getActiveSheet();
   try {
     var sheet = getSheet(SHEET_NAMES.MONTHLY_SUMMARY);
-
-    // 対象年月を取得
-    var yearMonthStr = sheet.getRange('B1').getValue();
-    if (!yearMonthStr) {
-      Logger.log('対象年月が選択されていません');
-      return;
-    }
+    var yearStr = sheet.getRange('B1').getValue();
+    var monthStr = sheet.getRange('B2').getValue();
+    var scope = buildScope_(yearStr, monthStr);
 
     ss.toast('月別集計を更新中...', '読み込み中', -1);
 
-    // 年のみ指定（年間集計）の場合
-    var yearOnly = parseYearOnly_(String(yearMonthStr).trim());
-    if (yearOnly !== null) {
-      updateAnnualSummary_(sheet, yearOnly);
-      ss.toast('月別集計の更新が完了しました', '完了', 3);
-      Logger.log('月別集計を更新しました（年間）: ' + yearMonthStr);
-      return;
-    }
-
-    var ym = parseYearMonth(yearMonthStr);
-
-    // 児童マスタ取得
-    var masterData = getChildMasterData();
-
-    // フォームの回答（実記録）から該当月データ取得して集計
-    var formResponses = getFormResponsesByMonth(ym.year, ym.month);
-    var visitCounts = countVisitsByFormResponses_(formResponses, ym.year, ym.month);
-
-    // データエリアをクリア（ヘッダーは残す）
-    var lastRow = sheet.getLastRow();
-    if (lastRow >= SUMMARY_DATA_START_ROW) {
-      var lastCol = Math.max(sheet.getLastColumn(), 6);
-      sheet.getRange(SUMMARY_DATA_START_ROW, 1, lastRow - SUMMARY_DATA_START_ROW + 1, lastCol).clearContent();
-      sheet.getRange(SUMMARY_DATA_START_ROW, 1, lastRow - SUMMARY_DATA_START_ROW + 1, lastCol).clearFormat();
-    }
-
-    // ヘッダーを月別に復元
-    var headers = ['No.', '児童名', '月間利用枠', '来館数', '残数', '利用率'];
-    sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
-    var headerRange = sheet.getRange(2, 1, 1, headers.length);
-    headerRange.setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
-
-    // 集計データを書き込み
-    if (masterData.length === 0) {
-      Logger.log('表示対象の児童がいません');
-      return;
-    }
-
-    var outputData = masterData.map(function(row) {
-      var childName = row[MASTER_COL.NAME - 1];
-      var quota = row[MASTER_COL.MONTHLY_QUOTA - 1] || 0;
-      var visits = visitCounts[childName] || 0;
-      var remaining = quota - visits;
-      var usageRate = quota > 0 ? visits / quota : 0;
-
-      return [
-        row[MASTER_COL.NO - 1],
-        childName,
-        quota,
-        visits,
-        remaining,
-        usageRate,
-      ];
-    });
-
-    sheet.getRange(SUMMARY_DATA_START_ROW, 1, outputData.length, 6).setValues(outputData);
-
-    // 利用率列の表示形式を%に設定
-    sheet.getRange(SUMMARY_DATA_START_ROW, SUMMARY_COL.USAGE_RATE, outputData.length, 1)
-      .setNumberFormat('0%');
+    writeMonthlySummaryByScope_(sheet, scope);
 
     ss.toast('月別集計の更新が完了しました', '完了', 3);
-    Logger.log('月別集計を更新しました: ' + yearMonthStr + ' (' + outputData.length + '名)');
+    Logger.log('月別集計を更新しました: ' + describeScope_(scope));
   } catch (error) {
     logError_('updateMonthlySummary', error);
   } finally {
@@ -93,44 +30,37 @@ function updateMonthlySummary() {
 }
 
 /**
- * 年間集計を月別集計シートに書き込む
- * 年間利用枠・年間来館数・残数・利用率を表示する
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet 月別集計シート
- * @param {number} year 対象年
+ * スコープに応じて月別集計を書き込む
+ * ヘッダー書式は setup で設定済みのため触らず、データ行のみ差し替える
  */
-function updateAnnualSummary_(sheet, year) {
+function writeMonthlySummaryByScope_(sheet, scope) {
   var masterData = getChildMasterData();
 
-  // データエリアをクリア（ヘッダーは残す）
+  // データエリアをクリア（スタイルは維持するため clearContent のみ）
   var lastRow = sheet.getLastRow();
   if (lastRow >= SUMMARY_DATA_START_ROW) {
-    var lastCol = Math.max(sheet.getLastColumn(), 6);
-    sheet.getRange(SUMMARY_DATA_START_ROW, 1, lastRow - SUMMARY_DATA_START_ROW + 1, lastCol).clearContent();
-    sheet.getRange(SUMMARY_DATA_START_ROW, 1, lastRow - SUMMARY_DATA_START_ROW + 1, lastCol).clearFormat();
+    sheet.getRange(SUMMARY_DATA_START_ROW, 1, lastRow - SUMMARY_DATA_START_ROW + 1, 6).clearContent();
   }
-
-  // ヘッダーを年間用に更新
-  var headers = ['No.', '児童名', '年間利用枠', '来館数', '残数', '利用率'];
-  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(2, 1, 1, headers.length)
-    .setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
 
   if (masterData.length === 0) {
     Logger.log('表示対象の児童がいません');
     return;
   }
 
-  // 年間フォーム回答から来館数を集計
-  var formResponses = getFormResponsesByYear(year);
-  var visitCounts = countVisitsByFormResponses_(formResponses);
+  // 利用枠は scope に応じて月間/年間を切替
+  var useAnnualQuota = (scope.type === 'year' || scope.type === 'all');
+  var quotaColIdx = useAnnualQuota ? MASTER_COL.ANNUAL_QUOTA - 1 : MASTER_COL.MONTHLY_QUOTA - 1;
+
+  // フォーム回答から来館数を集計
+  var formResponses = collectFormResponsesByScope_(scope);
+  var visitCounts = countVisitsByScope_(formResponses, scope);
 
   var outputData = masterData.map(function(row) {
     var childName = row[MASTER_COL.NAME - 1];
-    var quota = row[MASTER_COL.ANNUAL_QUOTA - 1] || 0;
+    var quota = row[quotaColIdx] || 0;
     var visits = visitCounts[childName] || 0;
     var remaining = quota > 0 ? quota - visits : '';
     var usageRate = quota > 0 ? visits / quota : 0;
-
     return [
       row[MASTER_COL.NO - 1],
       childName,
@@ -147,38 +77,34 @@ function updateAnnualSummary_(sheet, year) {
 }
 
 /**
- * フォームの回答データから児童名ごとの来館回数を集計する
- * （実記録のみカウント。振り分けは含まない）
- * 年月指定がある場合、対象月に含まれる日数のみカウントする（月またぎ連泊対応）
- * @param {Array<Array>} formResponses フォームの回答データ
- * @param {number} [year] 対象年（省略時は全日数カウント）
- * @param {number} [month] 対象月 1-12（省略時は全日数カウント）
- * @returns {Object} {児童名: 回数}
+ * スコープに応じてフォーム回答を取得する
+ * @param {{type: string, year?: number, month?: number}} scope
+ * @returns {Array<Array>} フォーム回答データ
  */
-function countVisitsByFormResponses_(formResponses, year, month) {
-  var counts = {};
-  var filterByMonth = (year !== undefined && month !== undefined);
+function collectFormResponsesByScope_(scope) {
+  if (scope.type === 'month') return getFormResponsesByMonth(scope.year, scope.month);
+  if (scope.type === 'year') return getFormResponsesByYear(scope.year);
+  // month_all_years / all は全データを渡し、カウント側でスコープ判定する
+  return getFormResponsesAll_();
+}
 
+/**
+ * スコープに合致する日数を児童名ごとに数える（連泊は宿泊日ごとに1カウント）
+ * @param {Array<Array>} formResponses フォーム回答データ
+ * @param {{type: string, year?: number, month?: number}} scope
+ * @returns {Object} {児童名: 日数}
+ */
+function countVisitsByScope_(formResponses, scope) {
+  var counts = {};
   formResponses.forEach(function(row) {
     var childName = row[FORM_COL.CHILD_NAME - 1];
     if (!childName) return;
-    var checkIn = row[FORM_COL.CHECK_IN - 1];
-    var checkOut = row[FORM_COL.CHECK_OUT - 1];
-
-    if (filterByMonth) {
-      // 対象月に含まれる日数のみカウント
-      var stayDates = expandStayToDates_(checkIn, checkOut);
-      var daysInMonth = 0;
-      stayDates.forEach(function(d) {
-        if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
-          daysInMonth++;
-        }
-      });
-      counts[childName] = (counts[childName] || 0) + daysInMonth;
-    } else {
-      var days = calcStayDays_(checkIn, checkOut);
-      counts[childName] = (counts[childName] || 0) + days;
-    }
+    var stayDates = expandStayToDates_(row[FORM_COL.CHECK_IN - 1], row[FORM_COL.CHECK_OUT - 1]);
+    stayDates.forEach(function(d) {
+      if (matchesScope_(d, scope)) {
+        counts[childName] = (counts[childName] || 0) + 1;
+      }
+    });
   });
   return counts;
 }

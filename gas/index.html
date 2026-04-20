@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>フォーム回答の修正</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; color: #333; background: #f0f2f5; }
+
+    /* ヘッダー */
+    .header { background: #1a73e8; color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 10; }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header p { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+
+    /* タブ */
+    .tabs { display: flex; background: white; border-bottom: 2px solid #1a73e8; position: sticky; top: 57px; z-index: 9; }
+    .tab { flex: 1; padding: 14px 8px; text-align: center; cursor: pointer; font-size: 14px; font-weight: 600; color: #777; background: white; border: none; transition: all 0.15s; }
+    .tab.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; margin-bottom: -2px; }
+
+    /* フィルター */
+    .filter-bar { background: white; padding: 12px 16px; border-bottom: 1px solid #e0e0e0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .filter-row { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .filter-bar label { font-size: 13px; font-weight: 600; color: #555; white-space: nowrap; }
+    .filter-bar select { flex: 1; padding: 10px 8px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; background: white; min-width: 0; -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23666' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+    .btn-load { padding: 10px 20px; background: #1a73e8; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .btn-load:active { background: #1557b0; }
+    .count-badge { background: #e8f0fe; color: #1a73e8; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; }
+
+    /* コンテンツ */
+    .content { padding: 12px 16px; }
+
+    /* カード */
+    .card-list { display: flex; flex-direction: column; gap: 10px; }
+    .card { background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); overflow: hidden; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8f9ff; border-bottom: 1px solid #e8eaf0; }
+    .card-date { font-size: 15px; font-weight: 700; color: #1a73e8; }
+    .card-child { font-size: 14px; font-weight: 600; }
+    .card-body { padding: 10px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+    .card-field { display: flex; flex-direction: column; }
+    .card-field-label { font-size: 10px; color: #999; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .card-field-value { font-size: 13px; color: #333; margin-top: 1px; }
+    .card-notes { grid-column: 1 / -1; }
+    .card-notes .card-field-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .card-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid #f0f0f0; }
+    .btn-edit { flex: 1; padding: 12px; background: #fbbc04; color: #333; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .btn-del { flex: 1; padding: 12px; background: #ea4335; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .btn-edit:active { background: #e5a800; }
+    .btn-del:active { background: #c5221f; }
+    .card-ts { padding: 4px 14px 8px; font-size: 10px; color: #bbb; }
+
+    /* 空・ローディング */
+    .state-box { text-align: center; padding: 48px 20px; color: #999; }
+    .spinner { width: 36px; height: 36px; border: 3px solid #e0e0e0; border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 編集モーダル（モバイル: フルスクリーン） */
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; }
+    .overlay.open { display: flex; align-items: flex-end; }
+    .modal { background: white; width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; display: flex; flex-direction: column; }
+    .modal-header { background: #1a73e8; color: white; padding: 16px 20px; font-size: 16px; font-weight: 600; border-radius: 16px 16px 0 0; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
+    .modal-close { background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0 4px; line-height: 1; }
+    .modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+    .modal-footer { padding: 12px 16px; border-top: 1px solid #eee; display: flex; gap: 10px; flex-shrink: 0; background: white; }
+    .modal-footer .btn-cancel { flex: 1; padding: 14px; background: #f1f3f4; color: #444; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .modal-footer .btn-save { flex: 2; padding: 14px; background: #1a73e8; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .modal-footer .btn-save:disabled { opacity: 0.5; }
+    .modal-footer .btn-cancel:active { background: #e2e5e9; }
+    .modal-footer .btn-save:active:not(:disabled) { background: #1557b0; }
+
+    .info-box { background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: #7c5a00; line-height: 1.5; }
+    .form-grid { display: flex; flex-direction: column; gap: 14px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group.full { grid-column: 1 / -1; }
+    .form-group label { font-size: 12px; font-weight: 700; color: #555; }
+    .form-group input, .form-group select, .form-group textarea {
+      padding: 12px 10px; border: 1px solid #ccc; border-radius: 8px;
+      font-size: 16px; font-family: inherit; width: 100%;
+      -webkit-appearance: none; appearance: none;
+    }
+    .form-group select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23666' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-color: white; padding-right: 28px; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #1a73e8; }
+    .form-group textarea { resize: vertical; min-height: 72px; }
+    .section-label { font-size: 11px; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 0.5px; padding-bottom: 2px; border-bottom: 1px solid #eee; margin-bottom: 2px; }
+
+    /* 削除確認 */
+    .confirm-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; align-items: flex-end; }
+    .confirm-bg.open { display: flex; }
+    .confirm-box { background: white; border-radius: 16px 16px 0 0; padding: 24px 20px; width: 100%; }
+    .confirm-box h3 { font-size: 17px; margin-bottom: 10px; color: #c62828; }
+    .confirm-box p { color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 6px; }
+    .confirm-box small { color: #f44336; font-size: 12px; display: block; }
+    .confirm-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .confirm-actions .btn-cancel { flex: 1; padding: 14px; background: #f1f3f4; color: #444; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .confirm-actions .btn-danger { flex: 2; padding: 14px; background: #ea4335; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+
+    /* トースト */
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 24px; color: white; font-weight: 600; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.25s; z-index: 300; box-shadow: 0 4px 16px rgba(0,0,0,0.3); white-space: nowrap; }
+    .toast.success { background: #34a853; }
+    .toast.error { background: #ea4335; }
+    .toast.info { background: #1a73e8; }
+    .toast.visible { opacity: 1; }
+
+    /* PC対応 */
+    @media (min-width: 640px) {
+      .overlay { align-items: center; padding: 20px; }
+      .modal { max-width: 560px; margin: 0 auto; max-height: 85vh; border-radius: 12px; }
+      .modal-header { border-radius: 12px 12px 0 0; }
+      .confirm-bg { align-items: center; }
+      .confirm-box { max-width: 400px; margin: 0 auto; border-radius: 12px; }
+      .card-body { grid-template-columns: repeat(4, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+  <div>
+    <h1>フォーム回答の修正</h1>
+    <p>誤送信されたフォームの回答を修正・削除できます</p>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" id="tab-year-btn" onclick="switchTab('year')">年度ビュー</div>
+  <div class="tab" id="tab-month-btn" onclick="switchTab('month')">月別ビュー</div>
+</div>
+
+<!-- 年度タブ -->
+<div id="panel-year">
+  <div class="filter-bar">
+    <div class="filter-row">
+      <label>年度</label>
+      <select id="year-select"></select>
+    </div>
+    <button class="btn-load" onclick="loadData('year')">表示する</button>
+    <span id="year-badge" class="count-badge" style="display:none"></span>
+  </div>
+  <div class="content">
+    <div id="year-body"><div class="state-box">年度を選択して「表示する」をタップしてください</div></div>
+  </div>
+</div>
+
+<!-- 月別タブ -->
+<div id="panel-month" style="display:none">
+  <div class="filter-bar">
+    <div class="filter-row">
+      <label>年</label>
+      <select id="month-year-select"></select>
+      <label>月</label>
+      <select id="month-select">
+        <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+        <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+        <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+        <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+      </select>
+    </div>
+    <button class="btn-load" onclick="loadData('month')">表示する</button>
+    <span id="month-badge" class="count-badge" style="display:none"></span>
+  </div>
+  <div class="content">
+    <div id="month-body"><div class="state-box">年・月を選択して「表示する」をタップしてください</div></div>
+  </div>
+</div>
+
+<!-- 編集モーダル -->
+<div class="overlay" id="edit-overlay" onclick="overlayBgClick(event)">
+  <div class="modal">
+    <div class="modal-header">
+      フォーム回答を修正
+      <button class="modal-close" onclick="closeEdit()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-box">修正後、溝口様_回答シートの確定来館記録を手動で再生成してください。</div>
+      <div class="form-grid">
+        <p class="section-label">基本情報</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>記録日 <span style="color:#ea4335">*</span></label>
+            <input type="date" id="f-recordDate">
+          </div>
+          <div class="form-group">
+            <label>児童名 <span style="color:#ea4335">*</span></label>
+            <select id="f-childName"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>スタッフ1</label>
+            <input type="text" id="f-staffName" placeholder="スタッフ名">
+          </div>
+          <div class="form-group">
+            <label>スタッフ2</label>
+            <input type="text" id="f-staffName2" placeholder="任意">
+          </div>
+        </div>
+
+        <p class="section-label">時間</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>入所日時</label>
+            <input type="datetime-local" id="f-checkIn">
+          </div>
+          <div class="form-group">
+            <label>退所日時</label>
+            <input type="datetime-local" id="f-checkOut">
+          </div>
+        </div>
+
+        <p class="section-label">健康・生活</p>
+        <div class="form-group">
+          <label>体温 (℃)</label>
+          <input type="number" id="f-temperature" step="0.1" min="35" max="42" placeholder="36.5">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>食事</label>
+            <select id="f-meal">
+              <option>○</option><option>×</option><option>△</option><option>完食</option><option>半分</option><option>-</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>入浴</label>
+            <select id="f-bath"><option>○</option><option>×</option><option>△</option><option>-</option></select>
+          </div>
+          <div class="form-group">
+            <label>睡眠</label>
+            <select id="f-sleep"><option>○</option><option>×</option><option>△</option><option>-</option></select>
+          </div>
+          <div class="form-group">
+            <label>便</label>
+            <select id="f-bowel"><option>○</option><option>×</option><option>△</option><option>-</option></select>
+          </div>
+          <div class="form-group">
+            <label>服薬</label>
+            <select id="f-medicine"><option>○</option><option>×</option><option>△</option><option>-</option></select>
+          </div>
+        </div>
+
+        <p class="section-label">連絡事項</p>
+        <div class="form-group">
+          <textarea id="f-notes" placeholder="特になし"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeEdit()">キャンセル</button>
+      <button class="btn-save" id="save-btn" onclick="saveRecord()">修正を保存する</button>
+    </div>
+  </div>
+</div>
+
+<!-- 削除確認 -->
+<div class="confirm-bg" id="confirm-bg">
+  <div class="confirm-box">
+    <h3>回答を削除</h3>
+    <p id="confirm-msg"></p>
+    <small>この操作は取り消せません。本当によろしいですか？</small>
+    <div class="confirm-actions">
+      <button class="btn-cancel" onclick="closeConfirm()">キャンセル</button>
+      <button class="btn-danger" id="confirm-exec">削除する</button>
+    </div>
+  </div>
+</div>
+
+<!-- トースト -->
+<div class="toast" id="toast"></div>
+
+<script>
+  var s = { tab: 'year', records: [], editIdx: -1, deleteIdx: -1 };
+
+  window.addEventListener('load', function() {
+    google.script.run
+      .withSuccessHandler(onInit)
+      .withFailureHandler(function(e) { showToast('初期化エラー: ' + e.message, 'error'); })
+      .getInitialDataWeb();
+  });
+
+  function onInit(data) {
+    ['year-select', 'month-year-select'].forEach(function(id) {
+      var el = document.getElementById(id);
+      el.innerHTML = '';
+      data.years.slice().reverse().forEach(function(y) {
+        el.innerHTML += '<option value="' + y + '">' + y + '年</option>';
+      });
+    });
+
+    var childSel = document.getElementById('f-childName');
+    childSel.innerHTML = '';
+    data.children.forEach(function(name) {
+      childSel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';
+    });
+
+    document.getElementById('month-select').value = new Date().getMonth() + 1;
+  }
+
+  function switchTab(tab) {
+    s.tab = tab;
+    document.getElementById('tab-year-btn').classList.toggle('active', tab === 'year');
+    document.getElementById('tab-month-btn').classList.toggle('active', tab === 'month');
+    document.getElementById('panel-year').style.display = tab === 'year' ? '' : 'none';
+    document.getElementById('panel-month').style.display = tab === 'month' ? '' : 'none';
+  }
+
+  function loadData(mode) {
+    var year = parseInt(document.getElementById(mode === 'year' ? 'year-select' : 'month-year-select').value);
+    var month = mode === 'month' ? parseInt(document.getElementById('month-select').value) : null;
+
+    document.getElementById(mode + '-body').innerHTML =
+      '<div class="state-box"><div class="spinner"></div><br>読み込み中...</div>';
+    document.getElementById(mode + '-badge').style.display = 'none';
+
+    google.script.run
+      .withSuccessHandler(function(records) {
+        s.records = records.slice().reverse();
+        renderCards(mode + '-body', mode + '-badge', s.records);
+      })
+      .withFailureHandler(function(e) {
+        document.getElementById(mode + '-body').innerHTML =
+          '<div class="state-box">読み込みエラー: ' + esc(e.message) + '</div>';
+      })
+      .getFormResponsesWeb(mode, year, month);
+  }
+
+  function renderCards(bodyId, badgeId, records) {
+    var badge = document.getElementById(badgeId);
+    if (!records.length) {
+      document.getElementById(bodyId).innerHTML = '<div class="state-box">該当するデータがありません</div>';
+      badge.style.display = 'none';
+      return;
+    }
+    badge.textContent = records.length + '件';
+    badge.style.display = '';
+
+    var html = '<div class="card-list">';
+    records.forEach(function(r, idx) {
+      html += '<div class="card">'
+        + '<div class="card-header">'
+        + '<span class="card-date">' + esc(r.recordDateDisplay) + '</span>'
+        + '<span class="card-child">' + esc(r.childName) + '</span>'
+        + '</div>'
+        + '<div class="card-body">'
+        + field('スタッフ1', r.staffName)
+        + field('スタッフ2', r.staffName2)
+        + field('入所', r.checkInDisplay ? r.checkInDisplay.replace(/^\d{4}\/\d{2}\/\d{2} /, '') : '-')
+        + field('退所', r.checkOutDisplay ? r.checkOutDisplay.replace(/^\d{4}\/\d{2}\/\d{2} /, '') : '-')
+        + field('体温', r.temperature ? r.temperature + '℃' : '-')
+        + field('食事', r.meal)
+        + field('入浴', r.bath)
+        + field('睡眠', r.sleep)
+        + field('便', r.bowel)
+        + field('服薬', r.medicine)
+        + (r.notes ? '<div class="card-field card-notes"><span class="card-field-label">連絡事項</span><span class="card-field-value">' + esc(r.notes) + '</span></div>' : '')
+        + '</div>'
+        + '<div class="card-actions">'
+        + '<button class="btn-edit" onclick="openEdit(' + idx + ')">修正</button>'
+        + '<button class="btn-del" onclick="openConfirm(' + idx + ')">削除</button>'
+        + '</div>'
+        + '<div class="card-ts">送信: ' + esc(r.timestamp) + '</div>'
+        + '</div>';
+    });
+    html += '</div>';
+    document.getElementById(bodyId).innerHTML = html;
+  }
+
+  function field(label, value) {
+    return '<div class="card-field"><span class="card-field-label">' + label + '</span><span class="card-field-value">' + esc(value || '-') + '</span></div>';
+  }
+
+  function openEdit(idx) {
+    var r = s.records[idx];
+    s.editIdx = idx;
+
+    document.getElementById('f-recordDate').value = r.recordDateInput;
+    setSelect('f-childName', r.childName);
+    document.getElementById('f-staffName').value = r.staffName;
+    document.getElementById('f-staffName2').value = r.staffName2;
+    document.getElementById('f-checkIn').value = r.checkInInput;
+    document.getElementById('f-checkOut').value = r.checkOutInput;
+    document.getElementById('f-temperature').value = r.temperature;
+    setSelectOrAdd('f-meal', r.meal);
+    setSelectOrAdd('f-bath', r.bath);
+    setSelectOrAdd('f-sleep', r.sleep);
+    setSelectOrAdd('f-bowel', r.bowel);
+    setSelectOrAdd('f-medicine', r.medicine);
+    document.getElementById('f-notes').value = r.notes;
+
+    var btn = document.getElementById('save-btn');
+    btn.disabled = false;
+    btn.textContent = '修正を保存する';
+    document.getElementById('edit-overlay').classList.add('open');
+  }
+
+  function closeEdit() { document.getElementById('edit-overlay').classList.remove('open'); }
+  function overlayBgClick(e) { if (e.target === document.getElementById('edit-overlay')) closeEdit(); }
+
+  function saveRecord() {
+    var btn = document.getElementById('save-btn');
+    btn.disabled = true;
+    btn.textContent = '保存中...';
+
+    var data = {
+      recordDateInput: document.getElementById('f-recordDate').value,
+      childName: document.getElementById('f-childName').value,
+      staffName: document.getElementById('f-staffName').value,
+      staffName2: document.getElementById('f-staffName2').value,
+      checkInInput: document.getElementById('f-checkIn').value,
+      checkOutInput: document.getElementById('f-checkOut').value,
+      temperature: document.getElementById('f-temperature').value,
+      meal: document.getElementById('f-meal').value,
+      bath: document.getElementById('f-bath').value,
+      sleep: document.getElementById('f-sleep').value,
+      bowel: document.getElementById('f-bowel').value,
+      medicine: document.getElementById('f-medicine').value,
+      notes: document.getElementById('f-notes').value,
+    };
+
+    var rowIndex = s.records[s.editIdx].rowIndex;
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        btn.disabled = false;
+        btn.textContent = '修正を保存する';
+        if (res.success) {
+          closeEdit();
+          showToast('修正しました。', 'success');
+          var r = s.records[s.editIdx];
+          r.recordDateDisplay = data.recordDateInput.replace(/-/g, '/');
+          r.recordDateInput = data.recordDateInput;
+          r.childName = data.childName;
+          r.staffName = data.staffName;
+          r.staffName2 = data.staffName2;
+          r.checkInInput = data.checkInInput;
+          r.checkInDisplay = data.checkInInput ? data.checkInInput.replace('T', ' ') : '';
+          r.checkOutInput = data.checkOutInput;
+          r.checkOutDisplay = data.checkOutInput ? data.checkOutInput.replace('T', ' ') : '';
+          r.temperature = data.temperature;
+          r.meal = data.meal; r.bath = data.bath; r.sleep = data.sleep;
+          r.bowel = data.bowel; r.medicine = data.medicine; r.notes = data.notes;
+          renderCards(s.tab + '-body', s.tab + '-badge', s.records);
+        } else {
+          showToast('保存に失敗しました: ' + (res.error || ''), 'error');
+        }
+      })
+      .withFailureHandler(function(e) {
+        btn.disabled = false;
+        btn.textContent = '修正を保存する';
+        showToast('エラー: ' + e.message, 'error');
+      })
+      .updateFormResponseWeb(rowIndex, data);
+  }
+
+  function openConfirm(idx) {
+    var r = s.records[idx];
+    s.deleteIdx = idx;
+    document.getElementById('confirm-msg').textContent =
+      '「' + r.recordDateDisplay + '  ' + r.childName + '」の回答を削除します。';
+    document.getElementById('confirm-exec').onclick = execDelete;
+    document.getElementById('confirm-bg').classList.add('open');
+  }
+
+  function closeConfirm() { document.getElementById('confirm-bg').classList.remove('open'); }
+
+  function execDelete() {
+    closeConfirm();
+    var idx = s.deleteIdx;
+    var r = s.records[idx];
+
+    showToast('削除中...', 'info');
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (res.success) {
+          showToast('削除しました。', 'success');
+          var deletedRow = r.rowIndex;
+          s.records.splice(idx, 1);
+          s.records.forEach(function(rec) { if (rec.rowIndex > deletedRow) rec.rowIndex--; });
+          renderCards(s.tab + '-body', s.tab + '-badge', s.records);
+        } else {
+          showToast('削除に失敗しました: ' + (res.error || ''), 'error');
+        }
+      })
+      .withFailureHandler(function(e) { showToast('エラー: ' + e.message, 'error'); })
+      .deleteFormResponseWeb(r.rowIndex);
+  }
+
+  function setSelect(id, value) {
+    var el = document.getElementById(id);
+    for (var i = 0; i < el.options.length; i++) {
+      if (el.options[i].value === value) { el.selectedIndex = i; return; }
+    }
+    el.selectedIndex = 0;
+  }
+
+  function setSelectOrAdd(id, value) {
+    var el = document.getElementById(id);
+    for (var i = 0; i < el.options.length; i++) {
+      if (el.options[i].value === value) { el.selectedIndex = i; return; }
+    }
+    if (value) {
+      var opt = document.createElement('option');
+      opt.value = value; opt.text = value;
+      el.add(opt); el.value = value;
+    }
+  }
+
+  function showToast(msg, type) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast ' + type;
+    setTimeout(function() { el.classList.add('visible'); }, 10);
+    setTimeout(function() { el.classList.remove('visible'); }, 4000);
+  }
+
+  function esc(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>

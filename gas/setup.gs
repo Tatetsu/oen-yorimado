@@ -5,6 +5,7 @@
 
 /**
  * 全シートの初期セットアップを実行する（手動実行・1回のみ）
+ * シート構造を整えたあと、データが存在するビューは初期描画も行う
  */
 function setupAllSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -16,8 +17,29 @@ function setupAllSheets() {
   setupLogSheet_(ss);
   setupChildMasterValidations_();
 
+  // 初期描画（フォーム回答がある場合のみ）
+  populateViewsIfDataExists_();
+
   Logger.log('全シートの初期セットアップが完了しました');
   SpreadsheetApp.getUi().alert('初期セットアップが完了しました');
+}
+
+/**
+ * フォーム回答データがある場合、ビューシートを初期描画する
+ * 児童別ビューは児童名の選択が必要なため除外
+ */
+function populateViewsIfDataExists_() {
+  try {
+    var formSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.FORM_RESPONSE);
+    if (!formSheet || formSheet.getLastRow() < FORM_DATA_START_ROW) return;
+
+    updateMonthlySummary();
+    updateConfirmedVisits();
+    filterConfirmedVisits_();
+    updateVisitCalendar();
+  } catch (e) {
+    logError_('populateViewsIfDataExists_', e);
+  }
 }
 
 /**
@@ -47,156 +69,162 @@ function refreshChildMasterValidations() {
 
 /**
  * 月別集計シートを作成・設定する
+ * レイアウト: 1行目=対象年, 2行目=対象月, 3行目=ヘッダー, 4行目〜=データ
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
  */
 function setupMonthlySummarySheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.MONTHLY_SUMMARY);
 
-  // 操作エリア（1行目）
-  sheet.getRange('A1').setValue('対象年月:');
+  // 操作エリア（1〜2行目）
+  sheet.getRange('A1').setValue('対象年:').setFontWeight('bold');
+  sheet.getRange('A2').setValue('対象月:').setFontWeight('bold');
 
-  // 年月ドロップダウン（B1）- 年全体オプション + 月オプション
-  var summaryOptions = generateMonthlySummaryOptions();
-  var yearMonthRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(summaryOptions, true)
-    .build();
-  sheet.getRange('B1').setDataValidation(yearMonthRule);
-  // 対象年の1月をデフォルトに設定
-  var year = getTargetYearFromFormResponses_();
-  sheet.getRange('B1').setValue(year + '年1月');
+  // 年ドロップダウン（B1）
+  var yearRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateYearOptions(), true).build();
+  sheet.getRange('B1').setDataValidation(yearRule);
+  var years = collectYearsFromFormResponses_();
+  sheet.getRange('B1').setValue(years[0] + '年');
 
-  // ヘッダー行（2行目）
-  var headers = ['No.', '児童名', '月間利用枠', '来館数', '残数', '利用率'];
-  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
+  // 月ドロップダウン（B2）- デフォルトは「すべて」
+  var monthRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateMonthOptions(), true).build();
+  sheet.getRange('B2').setDataValidation(monthRule);
+  sheet.getRange('B2').setValue('すべて');
 
-  // ヘッダー書式設定
-  var headerRange = sheet.getRange(2, 1, 1, headers.length);
-  headerRange.setBackground('#4285F4');
-  headerRange.setFontColor('#FFFFFF');
-  headerRange.setFontWeight('bold');
+  // ヘッダー行（3行目）
+  var headers = ['No.', '児童名', '利用枠', '来館数', '残数', '利用率'];
+  var headerRange = sheet.getRange(SUMMARY_HEADER_ROW, 1, 1, headers.length);
+  headerRange.setValues([headers]);
+  headerRange.setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
 
   // 行固定
-  sheet.setFrozenRows(2);
+  sheet.setFrozenRows(SUMMARY_HEADER_ROW);
 
   // 列幅調整
-  sheet.setColumnWidth(1, 40);   // No.
-  sheet.setColumnWidth(2, 100);  // 児童名
-  sheet.setColumnWidth(3, 90);   // 月間利用枠
-  sheet.setColumnWidth(4, 80);   // 来館数
-  sheet.setColumnWidth(5, 60);   // 残数
-  sheet.setColumnWidth(6, 70);   // 利用率
+  sheet.setColumnWidth(1, 40);
+  sheet.setColumnWidth(2, 100);
+  sheet.setColumnWidth(3, 90);
+  sheet.setColumnWidth(4, 80);
+  sheet.setColumnWidth(5, 60);
+  sheet.setColumnWidth(6, 70);
   Logger.log('月別集計シートのセットアップ完了');
 }
 
 /**
  * 確定来館記録シートを作成・設定する
+ * レイアウト: 1行目=対象年, 2行目=対象月, 3行目=ヘッダー, 4行目〜=データ
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
  */
 function setupConfirmedVisitsSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.CONFIRMED_VISITS);
 
-  // 操作エリア（1行目）
-  sheet.getRange('A1').setValue('対象年月:');
-  sheet.getRange('A1').setFontWeight('bold');
+  // 操作エリア（1〜2行目）
+  sheet.getRange('A1').setValue('対象年:').setFontWeight('bold');
+  sheet.getRange('A2').setValue('対象月:').setFontWeight('bold');
 
-  // 年月ドロップダウン（B1）
-  var confirmedOptions = generateConfirmedVisitsOptions();
-  var confirmedRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(confirmedOptions, true)
-    .build();
-  sheet.getRange('B1').setDataValidation(confirmedRule);
-  sheet.getRange('B1').setValue('すべて');
+  // 年ドロップダウン（B1）- デフォルトは前月の年
+  var yearRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateYearOptions(), true).build();
+  sheet.getRange('B1').setDataValidation(yearRule);
 
-  // ヘッダー行（2行目）
+  // 月ドロップダウン（B2）- デフォルトは前月
+  var monthRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateMonthOptions(), true).build();
+  sheet.getRange('B2').setDataValidation(monthRule);
+
+  // デフォルト値：現在日付の1ヶ月前（月初トリガーで前月データを集計するため）
+  var lastMonth = new Date();
+  lastMonth.setDate(1);
+  lastMonth.setMonth(lastMonth.getMonth() - 1);
+  sheet.getRange('B1').setValue(lastMonth.getFullYear() + '年');
+  sheet.getRange('B2').setValue((lastMonth.getMonth() + 1) + '月');
+
+  // ヘッダー行（3行目）
   var headers = ['記録日', '児童名', 'データ区分', 'スタッフ1', 'スタッフ2', '入所日時', '退所日時', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
-  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
-
-  // ヘッダー書式設定
-  var headerRange = sheet.getRange(2, 1, 1, headers.length);
-  headerRange.setBackground('#4285F4');
-  headerRange.setFontColor('#FFFFFF');
-  headerRange.setFontWeight('bold');
+  var headerRange = sheet.getRange(CONFIRMED_HEADER_ROW, 1, 1, headers.length);
+  headerRange.setValues([headers]);
+  headerRange.setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
 
   // 行固定（操作エリア+ヘッダー）
-  sheet.setFrozenRows(2);
+  sheet.setFrozenRows(CONFIRMED_HEADER_ROW);
 
   // 列幅調整
-  sheet.setColumnWidth(1, 100);  // 記録日
-  sheet.setColumnWidth(2, 100);  // 児童名
-  sheet.setColumnWidth(3, 80);   // データ区分
-  sheet.setColumnWidth(4, 100);  // スタッフ1
-  sheet.setColumnWidth(5, 100);  // スタッフ2
-  sheet.setColumnWidth(6, 130);  // 入所日時
-  sheet.setColumnWidth(7, 130);  // 退所日時
-  sheet.setColumnWidth(8, 60);   // 体温
-  sheet.setColumnWidth(9, 50);   // 食事
-  sheet.setColumnWidth(10, 50);  // 入浴
-  sheet.setColumnWidth(11, 50);  // 睡眠
-  sheet.setColumnWidth(12, 50);  // 便
-  sheet.setColumnWidth(13, 50);  // 服薬
-  sheet.setColumnWidth(14, 200); // その他連絡事項
+  sheet.setColumnWidth(1, 100);
+  sheet.setColumnWidth(2, 100);
+  sheet.setColumnWidth(3, 80);
+  sheet.setColumnWidth(4, 100);
+  sheet.setColumnWidth(5, 100);
+  sheet.setColumnWidth(6, 130);
+  sheet.setColumnWidth(7, 130);
+  sheet.setColumnWidth(8, 60);
+  sheet.setColumnWidth(9, 50);
+  sheet.setColumnWidth(10, 50);
+  sheet.setColumnWidth(11, 50);
+  sheet.setColumnWidth(12, 50);
+  sheet.setColumnWidth(13, 50);
+  sheet.setColumnWidth(14, 200);
 
   Logger.log('確定来館記録シートのセットアップ完了');
 }
 
 /**
  * 来館カレンダーシートを作成・設定する
+ * 来館カレンダーは年単位のみ（月ドロップダウンなし）
+ * レイアウト: 1行目=対象年, 2行目=凡例, 3行目=ヘッダー
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
  */
 function setupVisitCalendarSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.VISIT_CALENDAR);
 
   // 操作エリア（1行目）
-  sheet.getRange('A1').setValue('対象:');
-  sheet.getRange('A1').setFontWeight('bold');
+  sheet.getRange('A1').setValue('対象年:').setFontWeight('bold');
 
-  // ドロップダウン（B1）- 年オプション + 月オプション
-  var calendarOptions = generateCalendarOptions();
-  var calendarRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(calendarOptions, true)
-    .build();
-  sheet.getRange('B1').setDataValidation(calendarRule);
+  // 年ドロップダウン（B1）
+  var yearRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateYearOptions(), true).build();
+  sheet.getRange('B1').setDataValidation(yearRule);
+  var years = collectYearsFromFormResponses_();
+  sheet.getRange('B1').setValue(years[0] + '年');
 
-  // 対象年全体をデフォルトに設定
-  var calYear = getTargetYearFromFormResponses_();
-  sheet.getRange('B1').setValue(calYear + '年');
-
-  // 凡例（2行目）- 色付きはカレンダー更新時に writeLegend_ が上書きするため簡易テキストで初期化
-  sheet.getRange('A2').setValue('凡例: 緑=実データ  橙=振り分け');
-  sheet.getRange('A2').setFontSize(9);
-  sheet.getRange('A2').setFontColor('#666666');
+  // 凡例（2行目）
+  sheet.getRange('A2').setValue('凡例: 緑=実データ  橙=振り分け').setFontSize(9).setFontColor('#666666');
 
   Logger.log('来館カレンダーシートのセットアップ完了');
 }
 
 /**
  * 児童別ビューシートを作成・設定する
+ * レイアウト: 1行目=児童名, 2行目=対象年, 3行目=対象月, 4〜8行目=基本情報, 9行目=履歴ヘッダー
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
  */
 function setupChildViewSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.CHILD_VIEW);
 
-  // 操作エリア（1〜2行目）
+  // 操作エリア（1〜3行目）
   sheet.getRange('A1').setValue('児童名:');
-  sheet.getRange('A2').setValue('対象年月:');
+  sheet.getRange('A2').setValue('対象年:');
+  sheet.getRange('A3').setValue('対象月:');
 
   // 児童名ドロップダウン（B1）
-  var childNames = getChildNameOptions();
+  var childNames = getAllChildNameOptions();
   if (childNames.length > 0) {
     var childNameRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(childNames, true)
-      .build();
+      .requireValueInList(childNames, true).build();
     sheet.getRange('B1').setDataValidation(childNameRule);
   }
 
-  // 年月ドロップダウン（B2）- すべて・年・月の選択肢を含む
-  var childViewOptions = generateChildViewOptions();
-  var yearMonthRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(childViewOptions, true)
-    .build();
-  sheet.getRange('B2').setDataValidation(yearMonthRule);
-  // デフォルトは全期間表示（児童名を選ぶだけで全データ表示）
+  // 年ドロップダウン（B2）- デフォルトは「すべて」
+  var yearRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateYearOptions(), true).build();
+  sheet.getRange('B2').setDataValidation(yearRule);
   sheet.getRange('B2').setValue('すべて');
+
+  // 月ドロップダウン（B3）- デフォルトは「すべて」
+  var monthRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateMonthOptions(), true).build();
+  sheet.getRange('B3').setDataValidation(monthRule);
+  sheet.getRange('B3').setValue('すべて');
 
   // 基本情報エリアのラベル（4〜8行目）
   sheet.getRange('A4').setValue('保護者名:');
@@ -206,7 +234,7 @@ function setupChildViewSheet_(ss) {
   sheet.getRange('A8').setValue('来館回数 / 残枠 / 利用率:');
 
   // ラベル列を太字に
-  sheet.getRange('A4:A8').setFontWeight('bold');
+  sheet.getRange('A1:A8').setFontWeight('bold');
 
   // 基本情報エリアの罫線（A4:B8）
   var infoRange = sheet.getRange('A4:B8');
