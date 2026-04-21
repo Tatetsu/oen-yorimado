@@ -170,15 +170,16 @@ function setupConfirmedVisitsSheet_(ss) {
 
 /**
  * 来館カレンダーシートを作成・設定する
- * 来館カレンダーは年単位のみ（月ドロップダウンなし）
- * レイアウト: 1行目=対象年, 2行目=凡例, 3行目=ヘッダー
+ * B1=対象年、B2=対象月。月が「すべて」なら年別、具体値なら月別カレンダーを描画する
+ * レイアウト: 1行目=対象年, 2行目=対象月（凡例は3行目以降にカレンダーが描かれる）
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
  */
 function setupVisitCalendarSheet_(ss) {
   var sheet = getOrCreateSheet_(ss, SHEET_NAMES.VISIT_CALENDAR);
 
-  // 操作エリア（1行目）
+  // 操作エリア（1〜2行目）
   sheet.getRange('A1').setValue('対象年:').setFontWeight('bold');
+  sheet.getRange('A2').setValue('対象月:').setFontWeight('bold');
 
   // 年ドロップダウン（B1）
   var yearRule = SpreadsheetApp.newDataValidation()
@@ -187,8 +188,11 @@ function setupVisitCalendarSheet_(ss) {
   var years = collectYearsFromFormResponses_();
   sheet.getRange('B1').setValue(years[0] + '年');
 
-  // 凡例（2行目）
-  sheet.getRange('A2').setValue('凡例: 緑=実データ  橙=振り分け').setFontSize(9).setFontColor('#666666');
+  // 月ドロップダウン（B2）- デフォルトは「すべて」（=年別カレンダー）
+  var monthRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(generateMonthOptions(), true).build();
+  sheet.getRange('B2').setDataValidation(monthRule);
+  sheet.getRange('B2').setValue('すべて');
 
   Logger.log('来館カレンダーシートのセットアップ完了');
 }

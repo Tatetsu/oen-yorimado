@@ -17,9 +17,10 @@ function setupJudoView_() {
   view.getRange("A1:Z1000").clearDataValidations();
 
   view.getRange("A1").setValue("児童名：");
-  view.getRange("A2").setValue("対象年月：");
-  view.getRange("A1:A2").setFontWeight("bold");
-  view.getRange("D1").setValue("児童名を選んで利用実績を表示（年月は任意）");
+  view.getRange("A2").setValue("対象年：");
+  view.getRange("A3").setValue("対象月：");
+  view.getRange("A1:A3").setFontWeight("bold");
+  view.getRange("D1").setValue("児童名を選んで利用実績を表示（年・月は任意）");
   view.getRange("D1").setFontColor("#0000FF");
 
   var children = getUniqueChildren_(SHEET_JUDO);
@@ -30,15 +31,20 @@ function setupJudoView_() {
       .setValue(children[0]);
   }
 
-  var ymOptions = ["すべて"].concat(getUniqueYearMonthLabels_(SHEET_JUDO));
+  var yearOptions = ["すべて"].concat(getUniqueYears_(SHEET_JUDO));
   view.getRange("B2")
     .setDataValidation(SpreadsheetApp.newDataValidation()
-      .requireValueInList(ymOptions, true).setAllowInvalid(true).build())
+      .requireValueInList(yearOptions, true).setAllowInvalid(true).build())
     .setValue("すべて");
 
-  view.getRange("A4").setValue("来館回数：").setFontWeight("bold");
+  var monthOptions = ["すべて", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+  view.getRange("B3")
+    .setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInList(monthOptions, true).setAllowInvalid(true).build())
+    .setValue("すべて");
 
-  // ヘッダーはデータシートから動的生成（時刻列がDate型になるためformatTime_で変換）
+  view.getRange("A5").setValue("来館回数：").setFontWeight("bold");
+
   var dataSheet = ss.getSheetByName(SHEET_JUDO);
   if (dataSheet) {
     var sheetHeaders = dataSheet.getDataRange().getValues()[0];
@@ -47,7 +53,7 @@ function setupJudoView_() {
       var hVal = sheetHeaders[h];
       displayHeaders.push(hVal instanceof Date ? formatTime_(hVal) : String(hVal));
     }
-    setTableHeader_(view, 6, displayHeaders);
+    setTableHeader_(view, 7, displayHeaders);
     view.setColumnWidth(1, 110);
     for (var c = 2; c <= displayHeaders.length; c++) view.setColumnWidth(c, 50);
   }
@@ -61,40 +67,37 @@ function updateJudoView() {
   if (!view) return;
 
   var childName = view.getRange("B1").getDisplayValue().trim();
-  var ymLabel = view.getRange("B2").getDisplayValue().trim();
+  var filterYear = view.getRange("B2").getDisplayValue().trim();
+  var filterMonth = view.getRange("B3").getDisplayValue().trim();
 
   clearDataRows_(view);
 
   if (!childName) {
-    view.getRange("B4").setValue("―");
+    view.getRange("B5").setValue("―");
     return;
   }
-
-  var isAllPeriod = (!ymLabel || ymLabel === "すべて");
-  var yearMonth = isAllPeriod ? null : parseYmLabel_(ymLabel);
-  if (!isAllPeriod && !yearMonth) isAllPeriod = true;
 
   var dataSheet = ss.getSheetByName(SHEET_JUDO);
   if (!dataSheet) return;
 
   var allData = dataSheet.getDataRange().getValues();
   if (allData.length < 2) {
-    view.getRange("B4").setValue("0日");
+    view.getRange("B5").setValue("0日");
     return;
   }
 
   var filtered = [];
   for (var i = 1; i < allData.length; i++) {
     var row = allData[i];
-    var nameMatch = String(row[2]).trim() === childName;
-    var ymMatch = isAllPeriod || toYm_(row[0]) === yearMonth;
-    if (nameMatch && ymMatch) filtered.push(row);
+    if (String(row[2]).trim() === childName && matchYearMonth_(row[0], filterYear, filterMonth)) {
+      filtered.push(row);
+    }
   }
 
-  view.getRange("B4").setValue(filtered.length + "日");
+  view.getRange("B5").setValue(filtered.length + "日");
 
   if (filtered.length === 0) {
-    view.getRange("A7").setValue("該当データなし");
+    view.getRange("A8").setValue("該当データなし");
     return;
   }
 
@@ -106,7 +109,7 @@ function updateJudoView() {
     }
     return r;
   });
-  view.getRange(7, 1, rows.length, numCols + 1).setValues(rows);
+  view.getRange(8, 1, rows.length, numCols + 1).setValues(rows);
 }
 
 // === デバッグ：データシートの実際の値を確認 ===

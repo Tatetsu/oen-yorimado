@@ -18,9 +18,10 @@ function setupJissekiView_() {
   view.getRange("A1:Z1000").clearDataValidations();
 
   view.getRange("A1").setValue("児童名：");
-  view.getRange("A2").setValue("対象年月：");
-  view.getRange("A1:A2").setFontWeight("bold");
-  view.getRange("D1").setValue("児童名を選んで利用実績を表示（年月は任意）");
+  view.getRange("A2").setValue("対象年：");
+  view.getRange("A3").setValue("対象月：");
+  view.getRange("A1:A3").setFontWeight("bold");
+  view.getRange("D1").setValue("児童名を選んで利用実績を表示（年・月は任意）");
   view.getRange("D1").setFontColor("#0000FF");
 
   var children = getUniqueChildren_(SHEET_JISSEKI);
@@ -31,16 +32,22 @@ function setupJissekiView_() {
       .setValue(children[0]);
   }
 
-  var ymOptions = ["すべて"].concat(getUniqueYearMonthLabels_(SHEET_JISSEKI));
+  var yearOptions = ["すべて"].concat(getUniqueYears_(SHEET_JISSEKI));
   view.getRange("B2")
     .setDataValidation(SpreadsheetApp.newDataValidation()
-      .requireValueInList(ymOptions, true).setAllowInvalid(true).build())
+      .requireValueInList(yearOptions, true).setAllowInvalid(true).build())
     .setValue("すべて");
 
-  view.getRange("A4").setValue("来館回数：").setFontWeight("bold");
+  var monthOptions = ["すべて", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+  view.getRange("B3")
+    .setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInList(monthOptions, true).setAllowInvalid(true).build())
+    .setValue("すべて");
+
+  view.getRange("A5").setValue("来館回数：").setFontWeight("bold");
 
   var headers = ["記録日", "入所時間", "退所時間", "体温", "夕食", "朝食", "昼食", "入浴", "便", "服薬(夜)", "服薬(朝)", "その他連絡事項"];
-  setTableHeader_(view, 6, headers);
+  setTableHeader_(view, 7, headers);
   view.setColumnWidth(1, 110);
   view.setColumnWidth(2, 80);
   view.setColumnWidth(3, 80);
@@ -57,32 +64,37 @@ function updateJissekiView() {
   if (!view) return;
 
   var childName = view.getRange("B1").getDisplayValue().trim();
-  var ymLabel = view.getRange("B2").getDisplayValue().trim();
+  var filterYear = view.getRange("B2").getDisplayValue().trim();
+  var filterMonth = view.getRange("B3").getDisplayValue().trim();
 
   clearDataRows_(view);
 
   if (!childName) {
-    view.getRange("B4").setValue("―");
+    view.getRange("B5").setValue("―");
     return;
   }
 
-  var isAllPeriod = (!ymLabel || ymLabel === "すべて");
-  var yearMonth = isAllPeriod ? null : parseYmLabel_(ymLabel);
-  if (!isAllPeriod && !yearMonth) isAllPeriod = true;
+  var dataSheet = ss.getSheetByName(SHEET_JISSEKI);
+  if (!dataSheet) { view.getRange("B5").setValue("―"); return; }
 
-  var data = isAllPeriod
-    ? getAllFilteredData_(SHEET_JISSEKI, childName)
-    : getFilteredData_(SHEET_JISSEKI, childName, yearMonth);
+  var allData = dataSheet.getDataRange().getValues();
+  var data = [];
+  for (var i = 1; i < allData.length; i++) {
+    var row = allData[i];
+    if (String(row[2]).trim() === childName && matchYearMonth_(row[0], filterYear, filterMonth)) {
+      data.push(row);
+    }
+  }
 
-  view.getRange("B4").setValue(data.length + "回");
+  view.getRange("B5").setValue(data.length + "回");
 
   if (data.length === 0) {
-    view.getRange("A7").setValue("該当データなし");
+    view.getRange("A8").setValue("該当データなし");
     return;
   }
 
   var rows = data.map(function(r) {
     return [formatDate_(r[0]), formatTime_(r[3]), formatTime_(r[4]), r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13]];
   });
-  view.getRange(7, 1, rows.length, 12).setValues(rows);
+  view.getRange(8, 1, rows.length, 12).setValues(rows);
 }

@@ -122,10 +122,11 @@ function allocateRemainingPoints_(year, month) {
   formResponses.forEach(function(row) {
     var childName = row[FORM_COL.CHILD_NAME - 1];
     if (!childName) return;
+    var recordDate = row[FORM_COL.RECORD_DATE - 1];
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
     if (!visitDateMap[childName]) visitDateMap[childName] = {};
-    expandStayToDates_(checkIn, checkOut).forEach(function(d) {
+    expandStayToDates_(recordDate, checkIn, checkOut).forEach(function(d) {
       // 対象月の日付のみカウント
       if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
         var dateKey = formatDateKey_(d);
@@ -170,9 +171,10 @@ function allocateRemainingPoints_(year, month) {
     dailyVisitCounts[formatDateKey_(date)] = 0;
   });
   formResponses.forEach(function(row) {
+    var recordDate = row[FORM_COL.RECORD_DATE - 1];
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
-    expandStayToDates_(checkIn, checkOut).forEach(function(d) {
+    expandStayToDates_(recordDate, checkIn, checkOut).forEach(function(d) {
       // 対象月の日付のみカウント（月またぎ対応）
       if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
         var dateKey = formatDateKey_(d);

@@ -242,16 +242,16 @@ function getFormResponsesByMonth(year, month) {
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
 
-    // 入所日時がDate型の場合、滞在期間と対象月の重なりで判定
-    if (checkIn instanceof Date) {
+    // 入所/退所日時が両方フル日時（1900年以降）なら滞在期間と対象月の重なりで判定
+    if (checkIn instanceof Date && checkIn.getFullYear() >= 1900) {
       var stayStart = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
-      var stayEnd = (checkOut instanceof Date)
+      var stayEnd = (checkOut instanceof Date && checkOut.getFullYear() >= 1900)
         ? new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate())
         : stayStart;
       return stayStart <= monthEnd && stayEnd >= monthStart;
     }
 
-    // フォールバック: 記録日で判定
+    // 時刻のみ・不正値の場合は記録日で判定
     var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
     return recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month;
   });
@@ -545,14 +545,36 @@ function calcStayDays_(checkIn, checkOut) {
 }
 
 /**
- * 入所日時・退所日時からスティ期間の各日の Date 配列を返す
+ * 基準日（記録日）と入所/退所日時から宿泊日の Date 配列を返す
+ * - 入所/退所が時刻のみ（1899/12/30基準）の場合でも基準日を軸に正しい日付を生成する
+ * - 入所日時がフルDate、かつ退所日時もフルDateなら両者の日付差で展開
+ * @param {Date|string} recordDate 基準日（フォームの「記録日」列）
  * @param {Date} checkIn 入所日時
  * @param {Date} checkOut 退所日時
  * @returns {Array<Date>} 各宿泊日の Date 配列
  */
-function expandStayToDates_(checkIn, checkOut) {
-  var n = calcStayDays_(checkIn, checkOut);
-  var base = (checkIn instanceof Date) ? checkIn : new Date(checkIn);
+function expandStayToDates_(recordDate, checkIn, checkOut) {
+  var base = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
+  if (isNaN(base.getTime())) {
+    // recordDate が使えない場合は checkIn にフォールバック（後方互換）
+    if (checkIn instanceof Date && !isNaN(checkIn.getTime())) {
+      base = checkIn;
+    } else {
+      return [];
+    }
+  }
+
+  // 入所日時・退所日時が両方フルDate（1900年以降）なら差分で日数算出
+  // それ以外（時刻のみ等）は 1 日として扱う
+  var n = 1;
+  if (checkIn instanceof Date && checkOut instanceof Date
+      && checkIn.getFullYear() >= 1900 && checkOut.getFullYear() >= 1900) {
+    var inMid = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+    var outMid = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
+    var diff = Math.round((outMid - inMid) / 86400000);
+    n = Math.max(1, diff + 1);
+  }
+
   var result = [];
   for (var i = 0; i < n; i++) {
     result.push(new Date(base.getFullYear(), base.getMonth(), base.getDate() + i));

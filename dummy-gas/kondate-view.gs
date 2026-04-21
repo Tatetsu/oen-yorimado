@@ -16,8 +16,8 @@ var VIEW_KONDATE = "献立カレンダービュー";
 
 var KONDATE_DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 var KONDATE_ROWS_PER_WEEK = 6;
-var KONDATE_HEADER_ROW = 3;
-var KONDATE_DATA_START_ROW = 4;
+var KONDATE_HEADER_ROW = 1;
+var KONDATE_DATA_START_ROW = 2;
 
 function setupKondateView_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -25,16 +25,34 @@ function setupKondateView_() {
   view.clear();
   view.getRange("A1:H200").clearDataValidations();
 
-  view.getRange("A1").setValue("対象年月：").setFontWeight("bold");
-  view.getRange("D1").setValue("年月を選んで献立カレンダーを表示（「すべて」で一覧表示）");
-  view.getRange("D1").setFontColor("#0000FF");
+  view.getRange("A1").setValue("年").setFontWeight("bold");
+  view.getRange("A2").setValue("月").setFontWeight("bold");
 
-  var ymLabels = getUniqueYearMonthLabels_(SHEET_KONDATE);
-  var ymOptions = ["すべて"].concat(ymLabels);
+  var now = new Date();
+  var currentYear = String(now.getFullYear());
+  var currentMonth = String(now.getMonth() + 1);
+
+  var yearOptions = getUniqueYears_(SHEET_KONDATE);
+  if (yearOptions.length === 0) yearOptions = [currentYear];
   view.getRange("B1")
     .setDataValidation(SpreadsheetApp.newDataValidation()
-      .requireValueInList(ymOptions, true).setAllowInvalid(true).build())
-    .setValue(ymLabels.length > 0 ? ymLabels[ymLabels.length - 1] : "すべて");
+      .requireValueInList(yearOptions, true).setAllowInvalid(true).build())
+    .setValue(currentYear);
+
+  var monthOptions = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+  view.getRange("B2")
+    .setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInList(monthOptions, true).setAllowInvalid(true).build())
+    .setValue(currentMonth);
+
+  // 列幅の初期値（フラットテーブル用・D列スタート）
+  view.setColumnWidth(4, 110);
+  view.setColumnWidth(5, 50);
+  view.setColumnWidth(6, 250);
+  view.setColumnWidth(7, 200);
+  view.setColumnWidth(8, 150);
+  view.setColumnWidth(9, 80);
+  view.setColumnWidth(10, 100);
 
   updateKondateView();
 }
@@ -44,11 +62,12 @@ function updateKondateView() {
   var view = ss.getSheetByName(VIEW_KONDATE);
   if (!view) return;
 
-  var ymLabel = view.getRange("B1").getDisplayValue().trim();
+  var filterYear = view.getRange("B1").getDisplayValue().trim();
+  var filterMonth = view.getRange("B2").getDisplayValue().trim();
 
-  // 3行目以降をクリア
-  var lastRow = Math.max(view.getLastRow(), KONDATE_DATA_START_ROW + 50);
-  view.getRange(KONDATE_HEADER_ROW, 1, lastRow - KONDATE_HEADER_ROW + 1, 8).clear();
+  var clearRows = Math.max(view.getLastRow() + 10, 500);
+  // A〜C列（フィルタ行）は触れず、D列以降のみクリア
+  view.getRange(1, 4, clearRows, 7).clearContent();
 
   var dataSheet = ss.getSheetByName(SHEET_KONDATE);
   if (!dataSheet) {
@@ -62,20 +81,9 @@ function updateKondateView() {
     return;
   }
 
-  var isAllPeriod = (!ymLabel || ymLabel === "すべて");
+  if (!filterYear || !filterMonth) return;
 
-  if (isAllPeriod) {
-    showKondateFlatTable_(view, allData);
-    return;
-  }
-
-  var yearMonth = parseYmLabel_(ymLabel);
-  if (!yearMonth) {
-    view.getRange(KONDATE_DATA_START_ROW, 1).setValue("年月の解析に失敗しました");
-    return;
-  }
-
-  // 該当月のデータを日付キー → 行で管理
+  var yearMonth = filterYear + "-" + ("0" + parseInt(filterMonth, 10)).slice(-2);
   var dateMap = {};
   for (var i = 1; i < allData.length; i++) {
     var row = allData[i];
@@ -83,7 +91,6 @@ function updateKondateView() {
     var key = normDateKey_(row[0]);
     if (key) dateMap[key] = row;
   }
-
   drawKondateCalendar_(view, yearMonth, dateMap);
 }
 
@@ -93,16 +100,18 @@ function drawKondateCalendar_(view, yearMonth, dateMap) {
   var month = parseInt(parts[1]);
   var daysInMonth = new Date(year, month, 0).getDate();
 
-  // 曜日ヘッダー
-  view.getRange(KONDATE_HEADER_ROW, 1, 1, 7)
+  var CAL_START_COL = 4; // D列スタート（A〜C列を汚染しない）
+
+  // 曜日ヘッダー（D列から）
+  view.getRange(KONDATE_HEADER_ROW, CAL_START_COL, 1, 7)
     .setValues([KONDATE_DAY_LABELS])
     .setFontWeight("bold")
     .setBackground("#4A86C8")
     .setFontColor("#FFFFFF")
     .setHorizontalAlignment("center");
 
-  // 列幅（月〜日 = A〜G）
-  for (var c = 1; c <= 7; c++) view.setColumnWidth(c, 130);
+  // カレンダー列幅（D〜J列）
+  for (var c = CAL_START_COL; c <= CAL_START_COL + 6; c++) view.setColumnWidth(c, 130);
 
   var firstDow = new Date(year, month - 1, 1).getDay(); // 0=Sun
   var startCol = (firstDow === 0) ? 6 : firstDow - 1;   // 0=月, 6=日
@@ -119,7 +128,7 @@ function drawKondateCalendar_(view, yearMonth, dateMap) {
 
     for (var col = startCol; col <= 6 && dayInMonth <= daysInMonth; col++, dayInMonth++) {
       var key = year + "-" + ("0" + month).slice(-2) + "-" + ("0" + dayInMonth).slice(-2);
-      rowDate[col] = dayInMonth;
+      rowDate[col] = String(dayInMonth);
       var entry = dateMap[key];
       if (entry) {
         rowMain[col] = entry[2];
@@ -130,16 +139,17 @@ function drawKondateCalendar_(view, yearMonth, dateMap) {
     }
     startCol = 0;
 
-    view.getRange(currentRow, 1, 1, 7)
+    view.getRange(currentRow, CAL_START_COL, 1, 7)
+      .setNumberFormat("@")
       .setValues([rowDate])
       .setFontWeight("bold")
       .setBackground("#E8F0FE")
       .setHorizontalAlignment("center");
-    view.getRange(currentRow + 1, 1, 1, 7).setValues([rowMain]).setBackground("#FFFFFF").setFontWeight("normal").setHorizontalAlignment("left");
-    view.getRange(currentRow + 2, 1, 1, 7).setValues([rowVeg]).setBackground("#FFFFFF").setHorizontalAlignment("left");
-    view.getRange(currentRow + 3, 1, 1, 7).setValues([rowDessert]).setBackground("#FFFFFF").setHorizontalAlignment("left");
-    view.getRange(currentRow + 4, 1, 1, 7).setValues([rowNutri]).setBackground("#F5F5F5").setFontColor("#888888").setHorizontalAlignment("left");
-    view.getRange(currentRow + 5, 1, 1, 7).setBackground("#E0E0E0");
+    view.getRange(currentRow + 1, CAL_START_COL, 1, 7).setValues([rowMain]).setBackground("#FFFFFF").setFontWeight("normal").setHorizontalAlignment("left");
+    view.getRange(currentRow + 2, CAL_START_COL, 1, 7).setValues([rowVeg]).setBackground("#FFFFFF").setHorizontalAlignment("left");
+    view.getRange(currentRow + 3, CAL_START_COL, 1, 7).setValues([rowDessert]).setBackground("#FFFFFF").setHorizontalAlignment("left");
+    view.getRange(currentRow + 4, CAL_START_COL, 1, 7).setValues([rowNutri]).setBackground("#F5F5F5").setFontColor("#888888").setHorizontalAlignment("left");
+    view.getRange(currentRow + 5, CAL_START_COL, 1, 7).setBackground("#E0E0E0");
 
     for (var r = currentRow; r < currentRow + KONDATE_ROWS_PER_WEEK; r++) {
       view.setRowHeight(r, 20);
@@ -150,16 +160,15 @@ function drawKondateCalendar_(view, yearMonth, dateMap) {
 }
 
 function showKondateFlatTable_(view, allData) {
+  var FLAT_START_COL = 4; // D列スタート
   var headers = ["日付", "曜日", "メイン", "野菜", "デザート", "飲み物", "栄養士"];
-  setTableHeader_(view, KONDATE_HEADER_ROW, headers);
 
-  view.setColumnWidth(1, 110);
-  view.setColumnWidth(2, 50);
-  view.setColumnWidth(3, 250);
-  view.setColumnWidth(4, 200);
-  view.setColumnWidth(5, 150);
-  view.setColumnWidth(6, 80);
-  view.setColumnWidth(7, 100);
+  view.getRange(KONDATE_HEADER_ROW, FLAT_START_COL, 1, headers.length)
+    .setValues([headers])
+    .setFontWeight("bold")
+    .setBackground("#4A86C8")
+    .setFontColor("#FFFFFF")
+    .setHorizontalAlignment("center");
 
   var rows = [];
   for (var i = 1; i < allData.length; i++) {
@@ -170,6 +179,8 @@ function showKondateFlatTable_(view, allData) {
     ]);
   }
   if (rows.length > 0) {
-    view.getRange(KONDATE_DATA_START_ROW, 1, rows.length, 7).setValues(rows);
+    view.getRange(KONDATE_DATA_START_ROW, FLAT_START_COL, rows.length, 7)
+      .setValues(rows)
+      .setHorizontalAlignment("left");
   }
 }

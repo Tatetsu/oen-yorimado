@@ -3,8 +3,8 @@
  */
 
 // フォームの質問タイトル（実際の質問文と異なる場合は修正すること）
-var FORM_TITLE_STAFF1 = 'スタッフ名';
-var FORM_TITLE_STAFF2 = 'スタッフ名2';
+var FORM_TITLE_STAFF1 = 'スタッフ1';
+var FORM_TITLE_STAFF2 = 'スタッフ2';
 var FORM_TITLE_CHILD = '児童名';
 
 /**

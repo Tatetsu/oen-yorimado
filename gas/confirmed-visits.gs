@@ -23,19 +23,22 @@ function updateConfirmedVisits(year, month) {
   }
 
   // 既存データを「残す行」と「置き換える行」に分離
+  // 不正な日付（pre-1900）の行は実データ・振り分け問わず除去する
   var keepRows = [];
   if (filterByMonth) {
     // 月指定あり: 対象月の実データ行だけを除去し、それ以外は保持
     keepRows = existingData.filter(function(row) {
-      if (row[CONFIRMED_COL.DATA_TYPE - 1] === '振り分け') return true; // 振り分け行は常に保持
       var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
-      // 対象月以外の実データ行は保持
+      if (isNaN(recordDate.getTime()) || recordDate.getFullYear() < 1900) return false;
+      if (row[CONFIRMED_COL.DATA_TYPE - 1] === '振り分け') return true;
       return !(recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month);
     });
   } else {
-    // 月指定なし（従来動作）: 振り分け行のみ保持
+    // 月指定なし（従来動作）: 振り分け行のみ保持（不正日付の振り分けは除去）
     keepRows = existingData.filter(function(row) {
-      return row[CONFIRMED_COL.DATA_TYPE - 1] === '振り分け';
+      if (row[CONFIRMED_COL.DATA_TYPE - 1] !== '振り分け') return false;
+      var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
+      return !isNaN(recordDate.getTime()) && recordDate.getFullYear() >= 1900;
     });
   }
 
@@ -43,10 +46,20 @@ function updateConfirmedVisits(year, month) {
   var formData = filterByMonth ? getFormResponsesByMonth(year, month) : getFormResponsesAll_();
   var newRows = [];
   formData.forEach(function(row) {
+    var recordDate = row[FORM_COL.RECORD_DATE - 1];
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
+
+    // 入所日時・退所日時が時刻のみの場合、記録日と合体してフル日時化する
+    var baseDate = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
+    var checkInFull = toDateTimeOnDate_(baseDate, checkIn);
+    var checkOutFull = toDateTimeOnDate_(baseDate, checkOut);
+    if (checkOutFull.getTime() <= checkInFull.getTime()) {
+      checkOutFull = new Date(checkOutFull.getTime() + 24 * 60 * 60 * 1000);
+    }
+
     // 宿泊日数分の行に展開（1泊2日なら2行、同日なら1行）
-    var stayDates = expandStayToDates_(checkIn, checkOut);
+    var stayDates = expandStayToDates_(recordDate, checkIn, checkOut);
     stayDates.forEach(function(stayDate) {
       // 月指定がある場合、対象月外の日付（翌月へ跨ぎなど）は除外
       if (filterByMonth && (stayDate.getFullYear() !== year || (stayDate.getMonth() + 1) !== month)) {
@@ -58,8 +71,8 @@ function updateConfirmedVisits(year, month) {
         '実データ',                             // データ区分
         row[FORM_COL.STAFF_NAME - 1],         // スタッフ1
         row[FORM_COL.STAFF_NAME_2 - 1],       // スタッフ2（任意・空欄の場合あり）
-        checkIn,                               // 入所日時（元の日時を保持）
-        checkOut,                              // 退所日時（元の日時を保持）
+        checkInFull,                           // 入所日時（記録日 + 時刻）
+        checkOutFull,                          // 退所日時（記録日 + 時刻、必要に応じて翌日）
         row[FORM_COL.TEMPERATURE - 1],        // 体温
         row[FORM_COL.MEAL - 1],               // 食事
         row[FORM_COL.BATH - 1],               // 入浴

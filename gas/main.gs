@@ -128,7 +128,7 @@ function onEdit(e) {
 
     if (sheetName === SHEET_NAMES.CHILD_VIEW && (cell === 'B1' || cell === 'B2' || cell === 'B3')) {
       updateChildView();
-    } else if (sheetName === SHEET_NAMES.VISIT_CALENDAR && cell === 'B1') {
+    } else if (sheetName === SHEET_NAMES.VISIT_CALENDAR && (cell === 'B1' || cell === 'B2')) {
       updateVisitCalendar();
     } else if (sheetName === SHEET_NAMES.MONTHLY_SUMMARY && (cell === 'B1' || cell === 'B2')) {
       updateMonthlySummary();
@@ -165,6 +165,7 @@ function refreshDropdowns() {
       { sheet: SHEET_NAMES.MONTHLY_SUMMARY,  cell: 'B1', options: yearOpts },
       { sheet: SHEET_NAMES.MONTHLY_SUMMARY,  cell: 'B2', options: monthOpts },
       { sheet: SHEET_NAMES.VISIT_CALENDAR,   cell: 'B1', options: yearOpts },
+      { sheet: SHEET_NAMES.VISIT_CALENDAR,   cell: 'B2', options: monthOpts },
       { sheet: SHEET_NAMES.CONFIRMED_VISITS, cell: 'B1', options: yearOpts },
       { sheet: SHEET_NAMES.CONFIRMED_VISITS, cell: 'B2', options: monthOpts },
     ];

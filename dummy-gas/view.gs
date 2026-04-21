@@ -29,7 +29,7 @@ function onEdit(e) {
   var sheetName = e.range.getSheet().getName();
   var col = e.range.getColumn();
   var row = e.range.getRow();
-  if (col !== 2 || row > 2) return;
+  if (col !== 2 || row > 3) return;
 
   if (sheetName === VIEW_JISSEKI) {
     updateJissekiView();
@@ -58,11 +58,11 @@ function getOrCreateSheet_(ss, name) {
   return sheet;
 }
 
-/** 7行目以降のデータ行のみクリア（ヘッダー・スタイルは温存） */
+/** 8行目以降のデータ行のみクリア（ヘッダー・スタイルは温存） */
 function clearDataRows_(view) {
-  var lastRow = Math.max(view.getLastRow(), 8);
-  if (lastRow >= 7) {
-    view.getRange(7, 1, lastRow - 6, 25).clearContent();
+  var lastRow = Math.max(view.getLastRow(), 9);
+  if (lastRow >= 8) {
+    view.getRange(8, 1, lastRow - 7, 25).clearContent();
   }
 }
 
@@ -154,6 +154,30 @@ function getUniqueChildren_(sheetName) {
     if (name) names[name] = true;
   }
   return Object.keys(names).sort();
+}
+
+/** データシートからユニーク年を取得（文字列 "2025" 形式） */
+function getUniqueYears_(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  var years = {};
+  for (var i = 1; i < data.length; i++) {
+    var ym = toYm_(data[i][0]);
+    if (ym && ym.length === 7) years[ym.split("-")[0]] = true;
+  }
+  return Object.keys(years).sort().reverse();
+}
+
+/** 年・月フィルタでデータ行を照合 */
+function matchYearMonth_(rowDate, filterYear, filterMonth) {
+  var ym = toYm_(rowDate);
+  if (!ym) return false;
+  var parts = ym.split("-");
+  var yearOk = (!filterYear || filterYear === "すべて" || filterYear === parts[0]);
+  var monthOk = (!filterMonth || filterMonth === "すべて" || parseInt(filterMonth, 10) === parseInt(parts[1], 10));
+  return yearOk && monthOk;
 }
 
 /** データシートからユニーク年月ラベルを取得（"2025年4月" 形式） */

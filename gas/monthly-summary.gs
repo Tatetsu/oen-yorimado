@@ -99,7 +99,7 @@ function countVisitsByScope_(formResponses, scope) {
   formResponses.forEach(function(row) {
     var childName = row[FORM_COL.CHILD_NAME - 1];
     if (!childName) return;
-    var stayDates = expandStayToDates_(row[FORM_COL.CHECK_IN - 1], row[FORM_COL.CHECK_OUT - 1]);
+    var stayDates = expandStayToDates_(row[FORM_COL.RECORD_DATE - 1], row[FORM_COL.CHECK_IN - 1], row[FORM_COL.CHECK_OUT - 1]);
     stayDates.forEach(function(d) {
       if (matchesScope_(d, scope)) {
         counts[childName] = (counts[childName] || 0) + 1;
