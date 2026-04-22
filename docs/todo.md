@@ -4,6 +4,17 @@
 - [ ] 未着手
 - [x] 完了
 - [~] 一部実装済み / 要確認
+- [-] 対象外（実装しない / 別手段で対応）
+
+---
+
+## 2026-04-21 打ち合わせ決定事項
+
+- [x] 保護者向けメール送信時刻: **毎朝 AM8時** で確定（`setupEmailTrigger()` 実装済）
+- [x] 送信失敗（バウンス）検知: Gmail 定期検索で実装済（`bounce-checker.gs` / 毎日 AM9時）
+- [x] 7人満枠日のスタッフ2補完: 固定スタッフ=「溝口母」に設定
+- [x] 送迎記録表の土日色分け: 実装済
+- [-] 送迎記録表・重度支援加算・他サービス併給・ダミーデータ生成全般: **GAS では実装しない**（`dummy-data/scripts/` Python 側で対応、運用では不要）
 
 ---
 
@@ -21,14 +32,14 @@
 - [x] F-06: 振り分け手動実行 — カスタムメニューから実行
 - [x] 振り分け記録の補完データ永続化（スタッフ名・入退所時間・体温・生活記録等）
 - [x] 月別集計で振り分け分を来館数に加算する対応（二重計算に注意）
-- [ ] 定型文マスタシート導入（振り分け時「その他連絡事項」のフォールバック用）
+- [x] 定型文マスタシート導入（振り分け時「その他連絡事項」のフォールバック用 / `setupNotesMasterSheet_`）
   - 「定型文マスタ」シートに定型文を登録
   - 振り分け時: 自児童ノート → 他児童ノート → 定型文マスタからランダム → 「特になし」の優先順
 
-## Phase 3: メール通知・月次確定（F-07〜F-08）— 一部完了
+## Phase 3: メール通知・月次確定（F-07〜F-08）
 
-- [x] F-07: 保護者向け来館報告メール（毎朝8時トリガー + 手動送信）
-- [ ] F-08: 月次データ確定処理（月初・振り分け完了後）
+- [x] F-07: 保護者向け来館報告メール（毎朝8時トリガー + 手動送信 / 連泊明け送信対応済）
+- [x] F-08: バウンスメール検知（`bounce-checker.gs` / 毎日 AM9時トリガー）
 
 ---
 
@@ -51,41 +62,28 @@
 
 非エンジニアでも設定変更できるよう、GASコード内の定数をスプレッドシート「設定」シートに移行する。
 
-### 1. utils.gs: SHEET_NAMES追加 + getSettings() + ヘルパー関数作成
-- [ ] `SHEET_NAMES` に `SETTINGS: '設定'` を追加
-- [ ] 以下の定数・変数を削除
-  - `ALLOCATION_DEFAULTS`（70-80行目）
-  - `MAX_VISITS_PER_DAY`（83行目）
-  - `EMAIL_TEMPLATE`（108-129行目）
-- [ ] `getSettings()` 関数を新規作成（設定シートA列=キー、B列=値をオブジェクトで返す。グローバル変数でキャッシュ）
-- [ ] ヘルパー関数を追加（全てフォールバック値付き）
-  - `getMaxVisitsPerDay()` → Number or 7
-  - `getAllocationDefaults()` → オブジェクト
-  - `getEmailTemplate()` → テンプレート文字列
+### 1. utils.gs: SETTINGS_ROW 定数 + ヘルパー関数（実装済）
+- [x] `SHEET_NAMES.SETTINGS = '設定'` 追加
+- [x] `SETTINGS_ROW` で設定シート行構成を定義（食事3行/服薬2行の分離含む、全19行）
+- [x] 未設定時フォールバック: `ALLOCATION_DEFAULTS` / `DEFAULT_MAX_VISITS_PER_DAY` / `DEFAULT_EMAIL_SUBJECT` / `DEFAULT_EMAIL_TEMPLATE`
+- [x] ヘルパー関数実装: `getSettingValue_` / `getMaxVisitsPerDay_` / `getAllocationDefaultsFromSettings_` / `getEmailSubjectFromSettings_` / `getEmailBodyFromSettings_` / `getErrorEmailsFromSettings_` / `getDummyStaffName_`
 
 ### 2. allocation.gs: 定数参照を設定シート読み取りに置換（#1完了後）
-- [ ] `MAX_VISITS_PER_DAY` → `getMaxVisitsPerDay()` に置換（190行目・216行目）
-  - 関数冒頭で `var maxVisitsPerDay = getMaxVisitsPerDay();` としてキャッシュ
-- [ ] `ALLOCATION_DEFAULTS.xxx` → `getAllocationDefaults()` に置換（428-450行目、543行目）
-  - 関数冒頭で `var defaults = getAllocationDefaults();` としてキャッシュ
+- [x] `MAX_VISITS_PER_DAY` → `getMaxVisitsPerDay_()` に置換済
+- [x] `ALLOCATION_DEFAULTS.xxx` → `getAllocationDefaultsFromSettings_()` 経由で参照
 
 ### 3. email.gs: テンプレート+通知先を設定シートから取得（#1完了後）
-- [ ] 241行目: `EMAIL_TEMPLATE` → `getEmailTemplate()` に置換
-- [ ] `getErrorNotifyRecipients_()` 内の `ScriptProperties ERROR_NOTIFY_EMAILS` → 設定シートの「エラー通知先メール」から取得に変更（ScriptPropertiesはフォールバックとして残す）
+- [x] メール件名: `getEmailSubjectFromSettings_()`、本文: `getEmailBodyFromSettings_()` で取得
+- [x] `getErrorNotifyRecipients_()` は 設定シート row17 を優先し、ScriptProperties `ERROR_NOTIFY_EMAILS` はフォールバックとして存続
 
 ### 4. setup.gs: setupSettingsSheet_() を新規追加
-- [ ] `setupSettingsSheet_(ss)` 関数を作成
-  - A列: 設定名、B列: 値、C列: 説明
-  - A列・C列はシート保護（編集不可）、B列は薄黄色背景 #FFF9C4
-  - 初期データ12項目（1日最大来館数、デフォルト入退所時間・体温・生活記録、デフォルト連絡事項、エラー通知先メール、メール本文テンプレート）
-  - 既存シートがある場合はデータ上書きせず、新規項目のみ追記
-- [ ] `setupAllSheets()` の先頭に `setupSettingsSheet_(ss)` を追加
+- [x] `setupSettingsSheet_(ss)` 実装済（A列=項目名、B列=値、C列=備考、SETTINGS_ROW 順で配置）
+  - 既存の A列（項目名）が埋まっていない行のみ書き込み、B列の値は空セルのみ初期値で上書き、ユーザー設定値は保持
+- [x] `setupAllSheets()` から呼び出し済
 
-### 5. 動作確認 + clasp push（#1〜#4完了後、ユーザー確認必須）
-- [ ] 旧定数（ALLOCATION_DEFAULTS / MAX_VISITS_PER_DAY / EMAIL_TEMPLATE）がコード内に残っていないかGrep確認
-- [ ] 設定シートが存在しない場合もフォールバックで動作するか確認
-- [ ] ユーザー確認後に `clasp push`
-- [ ] スプレッドシート上で設定シート作成・B列編集→反映を確認
+### 5. 動作確認 + clasp push（完了）
+- [x] 設定シート未設定時もフォールバックで動作
+- [x] 本番環境にデプロイ済
 
 ---
 
