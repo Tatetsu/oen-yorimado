@@ -4,42 +4,41 @@
  */
 
 /**
- * 全シートの初期セットアップを実行する（手動実行・1回のみ）
- * シート構造を整えたあと、データが存在するビューは初期描画も行う
+ * 初期セットアップ（シート作成＋トリガー作成）
+ * 既存シート・既存トリガーは削除せず、不足分だけ追加する。
+ * 月別集計・来館カレンダーなどのデータ更新は「月次一括処理」側で実行する。
  */
 function setupAllSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
+  // 1. シート作成・初期化
   setupMonthlySummarySheet_(ss);
   setupConfirmedVisitsSheet_(ss);
   setupVisitCalendarSheet_(ss);
   setupChildViewSheet_(ss);
   setupLogSheet_(ss);
+  setupNotesMasterSheet_(ss);
+  setupSettingsSheet_(ss);
   setupChildMasterValidations_();
 
-  // 初期描画（フォーム回答がある場合のみ）
-  populateViewsIfDataExists_();
+  // 2. トリガー作成
+  setupFormSyncTrigger();
+  setupMonthlyProcessTrigger();
+  setupEmailTrigger();
+  setupBounceCheckTrigger();
 
-  Logger.log('全シートの初期セットアップが完了しました');
-  SpreadsheetApp.getUi().alert('初期セットアップが完了しました');
-}
-
-/**
- * フォーム回答データがある場合、ビューシートを初期描画する
- * 児童別ビューは児童名の選択が必要なため除外
- */
-function populateViewsIfDataExists_() {
-  try {
-    var formSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.FORM_RESPONSE);
-    if (!formSheet || formSheet.getLastRow() < FORM_DATA_START_ROW) return;
-
-    updateMonthlySummary();
-    updateConfirmedVisits();
-    filterConfirmedVisits_();
-    updateVisitCalendar();
-  } catch (e) {
-    logError_('populateViewsIfDataExists_', e);
-  }
+  Logger.log('初期セットアップ完了（シート・トリガー）');
+  SpreadsheetApp.getUi().alert(
+    '初期セットアップが完了しました\n\n' +
+    '【作成・初期化したシート】\n' +
+    '・月別集計 / 来館カレンダー / 確定来館記録 / 児童別ビュー / ログ / 定型文マスタ / 設定\n\n' +
+    '【設定したトリガー】\n' +
+    '・毎日 AM1時: フォーム児童名・スタッフ同期\n' +
+    '・毎月1日 AM3時: 月次一括処理\n' +
+    '・毎朝 AM8時: 保護者メール送信\n' +
+    '・毎日 AM9時: バウンスメール確認\n\n' +
+    '次は「月次一括処理」からデータ集計を実行してください。'
+  );
 }
 
 /**
@@ -59,13 +58,6 @@ function setupChildMasterValidations_() {
   Logger.log('児童マスタのドロップダウン設定完了（重度支援区分 区分1〜区分5）');
 }
 
-/**
- * 児童マスタのドロップダウンを手動で再設定する（メニューから実行）
- */
-function refreshChildMasterValidations() {
-  setupChildMasterValidations_();
-  SpreadsheetApp.getUi().alert('児童マスタのドロップダウンを更新しました（重度支援区分 区分1〜区分5）');
-}
 
 /**
  * 月別集計シートを作成・設定する
@@ -140,8 +132,8 @@ function setupConfirmedVisitsSheet_(ss) {
   sheet.getRange('B1').setValue(lastMonth.getFullYear() + '年');
   sheet.getRange('B2').setValue((lastMonth.getMonth() + 1) + '月');
 
-  // ヘッダー行（3行目）
-  var headers = ['記録日', '児童名', 'データ区分', 'スタッフ1', 'スタッフ2', '入所日時', '退所日時', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
+  // ヘッダー行（3行目）- CONFIRMED_COL と完全一致させる
+  var headers = ['記録日', '児童名', 'データ区分', 'スタッフ1', 'スタッフ2', '入所日時', '退所日時', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項'];
   var headerRange = sheet.getRange(CONFIRMED_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers]);
   headerRange.setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
@@ -150,20 +142,23 @@ function setupConfirmedVisitsSheet_(ss) {
   sheet.setFrozenRows(CONFIRMED_HEADER_ROW);
 
   // 列幅調整
-  sheet.setColumnWidth(1, 100);
-  sheet.setColumnWidth(2, 100);
-  sheet.setColumnWidth(3, 80);
-  sheet.setColumnWidth(4, 100);
-  sheet.setColumnWidth(5, 100);
-  sheet.setColumnWidth(6, 130);
-  sheet.setColumnWidth(7, 130);
-  sheet.setColumnWidth(8, 60);
-  sheet.setColumnWidth(9, 50);
-  sheet.setColumnWidth(10, 50);
-  sheet.setColumnWidth(11, 50);
-  sheet.setColumnWidth(12, 50);
-  sheet.setColumnWidth(13, 50);
-  sheet.setColumnWidth(14, 200);
+  sheet.setColumnWidth(1, 100);  // 記録日
+  sheet.setColumnWidth(2, 100);  // 児童名
+  sheet.setColumnWidth(3, 80);   // データ区分
+  sheet.setColumnWidth(4, 100);  // スタッフ1
+  sheet.setColumnWidth(5, 100);  // スタッフ2
+  sheet.setColumnWidth(6, 130);  // 入所日時
+  sheet.setColumnWidth(7, 130);  // 退所日時
+  sheet.setColumnWidth(8, 60);   // 体温
+  sheet.setColumnWidth(9, 50);   // 夕食
+  sheet.setColumnWidth(10, 50);  // 朝食
+  sheet.setColumnWidth(11, 50);  // 昼食
+  sheet.setColumnWidth(12, 50);  // 入浴
+  sheet.setColumnWidth(13, 50);  // 睡眠
+  sheet.setColumnWidth(14, 50);  // 便
+  sheet.setColumnWidth(15, 60);  // 服薬(夜)
+  sheet.setColumnWidth(16, 60);  // 服薬(朝)
+  sheet.setColumnWidth(17, 200); // その他連絡事項
 
   Logger.log('確定来館記録シートのセットアップ完了');
 }
@@ -244,8 +239,8 @@ function setupChildViewSheet_(ss) {
   var infoRange = sheet.getRange('A4:B8');
   infoRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
 
-  // 来館履歴ヘッダー（9行目）
-  var historyHeaders = ['記録日', 'スタッフ名', '入所時間', '退所時間', '体温', '食事', '入浴', '睡眠', '便', '服薬', 'その他連絡事項'];
+  // 来館履歴ヘッダー（9行目）- child-view.gs の履歴出力と一致させる
+  var historyHeaders = ['記録日', 'スタッフ名', '入所時間', '退所時間', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項'];
   sheet.getRange(9, 1, 1, historyHeaders.length).setValues([historyHeaders]);
 
   // ヘッダー書式設定
@@ -262,20 +257,23 @@ function setupChildViewSheet_(ss) {
   sheet.setFrozenRows(9);
 
   // 列幅調整（A4横向き 約1050px に収まるよう最適化）
-  sheet.setColumnWidth(1, 90);   // 記録日
-  sheet.setColumnWidth(2, 90);   // スタッフ名
-  sheet.setColumnWidth(3, 65);   // 入所時間
-  sheet.setColumnWidth(4, 65);   // 退所時間
-  sheet.setColumnWidth(5, 50);   // 体温
-  sheet.setColumnWidth(6, 45);   // 食事
-  sheet.setColumnWidth(7, 45);   // 入浴
-  sheet.setColumnWidth(8, 45);   // 睡眠
-  sheet.setColumnWidth(9, 45);   // 便
-  sheet.setColumnWidth(10, 45);  // 服薬
-  sheet.setColumnWidth(11, 180); // その他連絡事項
+  sheet.setColumnWidth(1, 85);   // 記録日
+  sheet.setColumnWidth(2, 85);   // スタッフ名
+  sheet.setColumnWidth(3, 60);   // 入所時間
+  sheet.setColumnWidth(4, 60);   // 退所時間
+  sheet.setColumnWidth(5, 45);   // 体温
+  sheet.setColumnWidth(6, 40);   // 夕食
+  sheet.setColumnWidth(7, 40);   // 朝食
+  sheet.setColumnWidth(8, 40);   // 昼食
+  sheet.setColumnWidth(9, 40);   // 入浴
+  sheet.setColumnWidth(10, 40);  // 睡眠
+  sheet.setColumnWidth(11, 40);  // 便
+  sheet.setColumnWidth(12, 55);  // 服薬(夜)
+  sheet.setColumnWidth(13, 55);  // 服薬(朝)
+  sheet.setColumnWidth(14, 160); // その他連絡事項
 
   // フォントサイズを印刷向けに統一
-  sheet.getRange('A1:K100').setFontSize(10);
+  sheet.getRange('A1:N100').setFontSize(10);
   sheet.getRange('A1:A2').setFontWeight('bold');
 
   Logger.log('児童別ビューシートのセットアップ完了');
@@ -309,6 +307,88 @@ function setupLogSheet_(ss) {
 
   Logger.log('ログシートのセットアップ完了');
 }
+
+/**
+ * 定型文マスタシートを作成・設定する
+ * 振り分け時「その他連絡事項」のフォールバック用
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ */
+function setupNotesMasterSheet_(ss) {
+  var sheet = getOrCreateSheet_(ss, SHEET_NAMES.NOTES_MASTER);
+
+  var header = ['定型文（その他連絡事項）'];
+  var headerRange = sheet.getRange(1, 1, 1, 1);
+  headerRange.setValues([header]);
+  headerRange.setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 350);
+
+  Logger.log('定型文マスタシートのセットアップ完了');
+}
+
+/**
+ * 設定シートを作成・初期化する
+ * SETTINGS_ROW の行順に沿って「設定項目 / デフォルト値 / 備考」を配置する。
+ * 既存シートがある場合は上書きせず、シートが空の時だけ初期値を書き込む。
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ */
+function setupSettingsSheet_(ss) {
+  var sheet = getOrCreateSheet_(ss, SHEET_NAMES.SETTINGS);
+
+  // ヘッダー（1行目）
+  var headers = ['設定項目', 'デフォルト値', '備考'];
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setValues([headers]);
+  headerRange.setBackground('#4285F4').setFontColor('#FFFFFF').setFontWeight('bold');
+  sheet.setFrozenRows(1);
+
+  // 列幅
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 360);
+  sheet.setColumnWidth(3, 240);
+
+  // 設定項目と初期値の定義（SETTINGS_ROW と1:1で対応）
+  var rows = [
+    { row: SETTINGS_ROW.MAX_VISITS_PER_DAY, label: '1日最大来館数', value: DEFAULT_MAX_VISITS_PER_DAY, note: '1日あたりの最大来館数' },
+    { row: SETTINGS_ROW.CHECK_IN,            label: '入所時間',     value: ALLOCATION_DEFAULTS.CHECK_IN,     note: 'HH:mm 形式' },
+    { row: SETTINGS_ROW.CHECK_OUT,           label: '退所時間',     value: ALLOCATION_DEFAULTS.CHECK_OUT,    note: 'HH:mm 形式' },
+    { row: SETTINGS_ROW.BUSINESS_DAYS,       label: '営業日',       value: '月曜日 火曜日 水曜日 木曜日 金曜日 土曜日 日曜日', note: '曜日をスペース・カンマ区切り' },
+    { row: SETTINGS_ROW.TEMPERATURE,         label: '体温',         value: ALLOCATION_DEFAULTS.TEMPERATURE,  note: '' },
+    { row: SETTINGS_ROW.MEAL_DINNER,         label: '夕食',         value: ALLOCATION_DEFAULTS.MEAL_DINNER,  note: '' },
+    { row: SETTINGS_ROW.MEAL_BREAKFAST,      label: '朝食',         value: ALLOCATION_DEFAULTS.MEAL_BREAKFAST, note: '' },
+    { row: SETTINGS_ROW.MEAL_LUNCH,          label: '昼食',         value: ALLOCATION_DEFAULTS.MEAL_LUNCH,   note: '他サービス併給時は − 推奨' },
+    { row: SETTINGS_ROW.BATH,                label: '入浴',         value: ALLOCATION_DEFAULTS.BATH,         note: '' },
+    { row: SETTINGS_ROW.SLEEP,               label: '睡眠',         value: ALLOCATION_DEFAULTS.SLEEP,        note: '' },
+    { row: SETTINGS_ROW.BOWEL,               label: '便',           value: ALLOCATION_DEFAULTS.BOWEL,        note: '' },
+    { row: SETTINGS_ROW.MEDICINE_MORNING,    label: '服薬（朝）',   value: ALLOCATION_DEFAULTS.MEDICINE_MORNING, note: '' },
+    { row: SETTINGS_ROW.MEDICINE_NIGHT,      label: '服薬（夜）',   value: ALLOCATION_DEFAULTS.MEDICINE_NIGHT,   note: '' },
+    { row: SETTINGS_ROW.NOTES,               label: '連絡事項',     value: ALLOCATION_DEFAULTS.NOTES,        note: '複数候補は「定型文マスタ」シートに1行1件で登録' },
+    { row: SETTINGS_ROW.DUMMY_STAFF_NAME,    label: '固定スタッフ', value: '溝口母',                         note: '振り分け・スタッフ2補完用（7人満枠日に補完）' },
+    { row: SETTINGS_ROW.ERROR_EMAIL,         label: 'エラー通知先メール', value: '',                         note: '複数はカンマ区切り' },
+    { row: SETTINGS_ROW.EMAIL_SUBJECT,       label: 'メール件名',   value: DEFAULT_EMAIL_SUBJECT,            note: '保護者向け来館報告メールの件名' },
+    { row: SETTINGS_ROW.EMAIL_BODY,          label: 'メール本文',   value: DEFAULT_EMAIL_TEMPLATE,           note: '{保護者名}{日付}{児童名}{入所時間}{退所時間}{体温}{夕食}{朝食}{昼食}{入浴}{睡眠}{便}{服薬(夜)}{服薬(朝)}{連絡事項} が置換される' },
+  ];
+
+  // A列（項目名）は未記入行のみ書き込む。B列（値）は空の場合のみ初期値を書き込む。
+  // ユーザーが変更済みの値は保持する。
+  rows.forEach(function(r) {
+    var labelCell = sheet.getRange(r.row, 1);
+    if (!labelCell.getValue()) labelCell.setValue(r.label);
+    var valueCell = sheet.getRange(r.row, 2);
+    if (valueCell.getValue() === '' || valueCell.getValue() === null) {
+      valueCell.setValue(r.value);
+    }
+    var noteCell = sheet.getRange(r.row, 3);
+    if (!noteCell.getValue() && r.note) noteCell.setValue(r.note);
+  });
+
+  // メール本文セルは折り返し表示・上揃えにし、行高さを確保
+  sheet.getRange(SETTINGS_ROW.EMAIL_BODY, 2).setWrap(true).setVerticalAlignment('top');
+  sheet.setRowHeight(SETTINGS_ROW.EMAIL_BODY, 300);
+
+  Logger.log('設定シートのセットアップ完了');
+}
+
 
 /**
  * シートを取得、存在しなければ作成する
