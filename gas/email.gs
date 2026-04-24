@@ -24,7 +24,7 @@ function sendDailyVisitReports() {
 function sendVisitReportsManual() {
   var yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  var defaultDate = Utilities.formatDate(yesterday, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var defaultDate = formatDateYMD_(yesterday, 'yyyy-MM-dd');
 
   var html = HtmlService.createHtmlOutput(
     '<style>' +
@@ -92,7 +92,7 @@ function showResultAlert(message) {
  */
 function sendVisitReportsByDate_(targetDate) {
   var tz = Session.getScriptTimeZone();
-  var targetDateStr = Utilities.formatDate(targetDate, tz, 'yyyy-MM-dd');
+  var targetDateStr = formatDateYMD_(targetDate, 'yyyy-MM-dd', tz);
   Logger.log('来館報告メール送信開始: 対象日 = ' + targetDateStr);
 
   // フォームの回答から対象日のレコードを抽出
@@ -113,7 +113,20 @@ function sendVisitReportsByDate_(targetDate) {
   }
 
   // 児童マスタを取得してマップ化（児童名 → 行データ）
-  var childMasterMap = buildChildMasterMap_();
+  var childMasterMap = buildChildNameToRowMap_();
+
+  // 連泊ペアリングを事前計算: 各レコードに紐付く論理1宿泊の入退所を引けるようにする
+  var allResponses = getFormResponsesAll_();
+  var stays = pairOvernightRecords_(allResponses);
+  var stayByTimestamp = {};
+  stays.forEach(function(stay) {
+    stay.sourceRows.forEach(function(srcRow) {
+      var ts = srcRow[FORM_COL.TIMESTAMP - 1];
+      var name = srcRow[FORM_COL.CHILD_NAME - 1];
+      var key = (ts instanceof Date ? ts.getTime() : String(ts)) + '|' + name;
+      stayByTimestamp[key] = stay;
+    });
+  });
 
   // スクリプトプロパティから施設名を取得
   var props = PropertiesService.getScriptProperties();
@@ -153,7 +166,10 @@ function sendVisitReportsByDate_(targetDate) {
     }
 
     try {
-      var emailData = buildEmailData_(record, masterRow, targetDate, facilityName);
+      var ts2 = record[FORM_COL.TIMESTAMP - 1];
+      var stayKey = (ts2 instanceof Date ? ts2.getTime() : String(ts2)) + '|' + childName;
+      var pairedStay = stayByTimestamp[stayKey] || null;
+      var emailData = buildEmailData_(record, masterRow, targetDate, facilityName, pairedStay);
       MailApp.sendEmail({
         to: String(parentEmail).trim(),
         subject: emailData.subject,
@@ -162,7 +178,7 @@ function sendVisitReportsByDate_(targetDate) {
       });
 
       // 送信済フラグを書き込み
-      var sentTimestamp = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm');
+      var sentTimestamp = formatDateYMD_(new Date(), 'yyyy/MM/dd HH:mm', tz);
       formSheet.getRange(rowIndex, FORM_COL.EMAIL_SENT).setValue('送信済 ' + sentTimestamp);
 
       Logger.log('メール送信成功: ' + childName + ' → ' + parentEmail);
@@ -183,6 +199,7 @@ function sendVisitReportsByDate_(targetDate) {
 
 /**
  * フォームの回答から指定日のデータを取得する（行番号付き）
+ * 「記録日」基準でフィルタする（B-1: 連泊中も各記録日に1通ずつ毎朝送信）
  * @param {Date} targetDate 対象日付
  * @returns {Array<{rowIndex: number, data: Array}>} 該当日のフォーム回答データ（rowIndexはシート上の行番号、1始まり）
  */
@@ -191,16 +208,16 @@ function getFormResponsesByDate_(targetDate) {
   var data = sheet.getDataRange().getValues();
   var responses = data.slice(1);
   var tz = Session.getScriptTimeZone();
-  var targetStr = Utilities.formatDate(targetDate, tz, 'yyyy-MM-dd');
+  var targetStr = formatDateYMD_(targetDate, 'yyyy-MM-dd', tz);
 
   var results = [];
   for (var i = 0; i < responses.length; i++) {
     var recordDate = responses[i][FORM_COL.RECORD_DATE - 1];
-    if (!(recordDate instanceof Date)) continue;
-    var rowStr = Utilities.formatDate(recordDate, tz, 'yyyy-MM-dd');
-    if (rowStr === targetStr) {
+    if (!isValidDate_(recordDate)) continue;
+    var dateStr = formatDateYMD_(recordDate, 'yyyy-MM-dd', tz);
+    if (dateStr === targetStr) {
       results.push({
-        rowIndex: i + 2, // ヘッダー行(1行目)の次から
+        rowIndex: i + 2,
         data: responses[i],
       });
     }
@@ -209,47 +226,45 @@ function getFormResponsesByDate_(targetDate) {
 }
 
 /**
- * 児童マスタデータを児童名→行データのマップに変換する
- * @returns {Object} 児童名をキーとするマップ
- */
-function buildChildMasterMap_() {
-  var masterData = getChildMasterData();
-  var map = {};
-  for (var i = 0; i < masterData.length; i++) {
-    var name = masterData[i][MASTER_COL.NAME - 1];
-    map[name] = masterData[i];
-  }
-  return map;
-}
-
-/**
  * メールの件名と本文を組み立てる
  * @param {Array} record フォーム回答の1行
  * @param {Array} masterRow 児童マスタの1行
  * @param {Date} targetDate 対象日付
  * @param {string} facilityName 施設名
+ * @param {Object} [pairedStay] 連泊ペアリング後の論理1宿泊（連泊時の入退所表示に使用）
  * @returns {{subject: string, body: string}}
  */
-function buildEmailData_(record, masterRow, targetDate, facilityName) {
-  var tz = Session.getScriptTimeZone();
-  var dateStr = Utilities.formatDate(targetDate, tz, 'M月d日');
+function buildEmailData_(record, masterRow, targetDate, facilityName, pairedStay) {
+  var dateStr = formatDateYMD_(targetDate, 'M月d日');
   var childName = record[FORM_COL.CHILD_NAME - 1];
   var parentName = masterRow[MASTER_COL.PARENT_NAME - 1] || '';
 
-  var subject = '【テスト施設　来館記録のお知らせ】';
+  var subject = getEmailSubjectFromSettings_();
+  var template = getEmailBodyFromSettings_();
 
-  var body = EMAIL_TEMPLATE
+  // 連泊レコードは入退所が空欄のことがあるため、ペアリング後の値を優先採用
+  var displayCheckIn = record[FORM_COL.CHECK_IN - 1];
+  var displayCheckOut = record[FORM_COL.CHECK_OUT - 1];
+  if (pairedStay && pairedStay.isOvernight) {
+    if (!(displayCheckIn instanceof Date) && pairedStay.checkIn) displayCheckIn = pairedStay.checkIn;
+    if (!(displayCheckOut instanceof Date) && pairedStay.checkOut) displayCheckOut = pairedStay.checkOut;
+  }
+
+  var body = template
     .replace(/{保護者名}/g, parentName)
     .replace(/{日付}/g, dateStr)
     .replace(/{児童名}/g, childName)
-    .replace(/{入所時間}/g, formatTime_(record[FORM_COL.CHECK_IN - 1]))
-    .replace(/{退所時間}/g, formatTime_(record[FORM_COL.CHECK_OUT - 1]))
+    .replace(/{入所時間}/g, formatTime_(displayCheckIn))
+    .replace(/{退所時間}/g, formatTime_(displayCheckOut))
     .replace(/{体温}/g, record[FORM_COL.TEMPERATURE - 1] || '')
-    .replace(/{食事}/g, record[FORM_COL.MEAL - 1] || '')
+    .replace(/{夕食}/g, record[FORM_COL.MEAL_DINNER - 1] || '')
+    .replace(/{朝食}/g, record[FORM_COL.MEAL_BREAKFAST - 1] || '')
+    .replace(/{昼食}/g, record[FORM_COL.MEAL_LUNCH - 1] || '')
     .replace(/{入浴}/g, record[FORM_COL.BATH - 1] || '')
     .replace(/{睡眠}/g, record[FORM_COL.SLEEP - 1] || '')
     .replace(/{便}/g, record[FORM_COL.BOWEL - 1] || '')
-    .replace(/{服薬}/g, record[FORM_COL.MEDICINE - 1] || '')
+    .replace(/{服薬\(夜\)}/g, record[FORM_COL.MEDICINE_NIGHT - 1] || '')
+    .replace(/{服薬\(朝\)}/g, record[FORM_COL.MEDICINE_MORNING - 1] || '')
     .replace(/{連絡事項}/g, record[FORM_COL.NOTES - 1] || '特になし');
 
   return { subject: subject, body: body };
@@ -265,7 +280,7 @@ function formatTime_(value) {
     return '';
   }
   if (value instanceof Date) {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'HH:mm');
+    return formatDateYMD_(value, 'HH:mm');
   }
   return String(value);
 }
@@ -337,7 +352,8 @@ function notifyErrorLog() {
 
 /**
  * エラー通知の送信先メールアドレスを取得する
- * GAS実行者（固定） + スクリプトプロパティ ERROR_NOTIFY_EMAILS（カンマ区切り・任意）
+ * GAS実行者（固定） + 設定シートのエラー通知先メール（カンマ区切り）
+ *   + スクリプトプロパティ ERROR_NOTIFY_EMAILS（後方互換・任意）
  * @returns {Array<string>} メールアドレスの配列（重複排除済み）
  */
 function getErrorNotifyRecipients_() {
@@ -345,17 +361,19 @@ function getErrorNotifyRecipients_() {
   var ownerEmail = Session.getEffectiveUser().getEmail();
   var recipients = [ownerEmail];
 
-  // 追加通知先があれば追加
+  // 設定シート優先
+  var sheetEmails = getErrorEmailsFromSettings_();
+
+  // スクリプトプロパティ（後方互換）
   var props = PropertiesService.getScriptProperties();
-  var extraEmails = props.getProperty('ERROR_NOTIFY_EMAILS') || '';
-  if (extraEmails.trim()) {
-    var extras = extraEmails.split(',').map(function(email) {
-      return email.trim();
-    }).filter(function(email) {
-      return email !== '' && email !== ownerEmail;
-    });
-    recipients = recipients.concat(extras);
-  }
+  var extraProp = props.getProperty('ERROR_NOTIFY_EMAILS') || '';
+  var propEmails = extraProp.trim()
+    ? extraProp.split(',').map(function(e) { return e.trim(); }).filter(function(e) { return !!e; })
+    : [];
+
+  sheetEmails.concat(propEmails).forEach(function(email) {
+    if (email && recipients.indexOf(email) === -1) recipients.push(email);
+  });
 
   return recipients;
 }
@@ -364,21 +382,6 @@ function getErrorNotifyRecipients_() {
  * メール送信の時間トリガーを設定する（毎朝8時）
  */
 function setupEmailTrigger() {
-  // 既存のsendDailyVisitReportsトリガーを削除
-  var triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === 'sendDailyVisitReports') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-
-  // 毎朝8時のトリガーを作成
-  ScriptApp.newTrigger('sendDailyVisitReports')
-    .timeBased()
-    .everyDays(1)
-    .atHour(8)
-    .create();
-
+  setupTimeTrigger_('sendDailyVisitReports', { everyDays: 1, atHour: 8 });
   Logger.log('メール送信トリガーを設定しました（毎朝8時）');
-  SpreadsheetApp.getUi().alert('メール送信トリガーを設定しました（毎朝8時）');
 }

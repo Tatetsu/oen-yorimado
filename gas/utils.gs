@@ -17,7 +17,26 @@ const SHEET_NAMES = {
   LOG: 'ログ',
   SETTINGS: '設定',
   BOUNCE_LOG: 'バウンスログ',
+  NOTES_MASTER: '定型文マスタ',
+  ALLOWED_USERS: '許可ユーザー',
 };
+
+// 許可ユーザーシートの列インデックス（1始まり）
+// レイアウト: Row 1〜5=マニュアル/編集画面URL/TOKEN/ランダム文字列など（ユーザー編集領域）,
+//             Row 6=ヘッダー, Row 7〜=データ
+// 編集画面URL は B2 セルに記載される想定。
+// D列(URL)はARRAYFORMULAで自動生成される（B2のURLとC列のトークンを結合）
+const ALLOWED_USERS_COL = {
+  EMAIL: 1,
+  NAME: 2,
+  TOKEN: 3,
+  URL: 4,
+  ACTIVE: 5,
+  NOTE: 6,
+};
+const ALLOWED_USERS_HEADER_ROW = 6;
+const ALLOWED_USERS_DATA_START_ROW = 7;
+const ALLOWED_USERS_BASE_URL_CELL = 'B2'; // 編集画面URLのセル参照
 
 // 設定シートの行インデックス（C列=デフォルト値）。実シートの並びに合わせる
 const SETTINGS_ROW = {
@@ -26,16 +45,19 @@ const SETTINGS_ROW = {
   CHECK_OUT: 4,           // 退所時間
   BUSINESS_DAYS: 5,       // 営業日
   TEMPERATURE: 6,         // 体温
-  MEAL: 7,                // 食事
-  BATH: 8,                // 入浴
-  SLEEP: 9,               // 睡眠
-  BOWEL: 10,              // 便
-  MEDICINE: 11,           // 服薬
-  NOTES: 12,              // 連絡事項
-  DUMMY_STAFF_NAME: 13,   // 固定スタッフ（振り分け・スタッフ2補完用）
-  ERROR_EMAIL: 14,        // エラー通知先メール
-  EMAIL_SUBJECT: 15,      // メール件名
-  EMAIL_BODY: 16,         // メール本文
+  MEAL_DINNER: 7,         // 夕食
+  MEAL_BREAKFAST: 8,      // 朝食
+  MEAL_LUNCH: 9,          // 昼食
+  BATH: 10,               // 入浴
+  SLEEP: 11,              // 睡眠
+  BOWEL: 12,              // 便
+  MEDICINE_MORNING: 13,   // 服薬（朝）
+  MEDICINE_NIGHT: 14,     // 服薬（夜）
+  NOTES: 15,              // 連絡事項
+  DUMMY_STAFF_NAME: 16,   // 固定スタッフ（振り分け・スタッフ2補完用）
+  ERROR_EMAIL: 17,        // エラー通知先メール（カンマ区切り）
+  EMAIL_SUBJECT: 18,      // メール件名
+  EMAIL_BODY: 19,         // メール本文
 };
 
 // 児童マスタの列インデックス（1始まり）
@@ -61,22 +83,29 @@ const MASTER_COL = {
 const FORM_DATA_START_ROW = 2;
 
 // フォームの回答の列インデックス（1始まり）
+// 行政様式の実績記録票に合わせ、食事は夕/朝/昼、服薬は夜/朝に分離する
+// CHECK_OUT は「退所予定日時」として扱う（連泊初日・中日は空欄可）
+// OVERNIGHT_FLAG: 連泊フラグ（true=連泊、false/空欄=単泊）。退所予定日時の直後に配置
 const FORM_COL = {
   TIMESTAMP: 1,
   RECORD_DATE: 2,
-  STAFF_NAME: 3,    // スタッフ1
-  STAFF_NAME_2: 4,  // スタッフ2（任意）
+  STAFF_NAME: 3,           // スタッフ1
+  STAFF_NAME_2: 4,         // スタッフ2（任意）
   CHILD_NAME: 5,
-  CHECK_IN: 6,
-  CHECK_OUT: 7,
-  TEMPERATURE: 8,
-  MEAL: 9,
-  BATH: 10,
-  SLEEP: 11,
-  BOWEL: 12,
-  MEDICINE: 13,
-  NOTES: 14,
-  EMAIL_SENT: 15,
+  CHECK_IN: 6,             // 入所日時（連泊・最終日は空欄可）
+  CHECK_OUT: 7,            // 退所予定日時（連泊・初日/中日は空欄可）
+  OVERNIGHT_FLAG: 8,       // 連泊フラグ（true/false）
+  TEMPERATURE: 9,
+  MEAL_DINNER: 10,         // 夕食
+  MEAL_BREAKFAST: 11,      // 朝食
+  MEAL_LUNCH: 12,          // 昼食
+  BATH: 13,
+  SLEEP: 14,
+  BOWEL: 15,
+  MEDICINE_NIGHT: 16,      // 服薬(夜)
+  MEDICINE_MORNING: 17,    // 服薬(朝)
+  NOTES: 18,
+  EMAIL_SENT: 19,          // メール送信済（システム管理・初回送信時に追加）
 };
 
 // 月別集計の列インデックス（1始まり）
@@ -101,20 +130,24 @@ const CALENDAR_LAYOUT = {
 };
 
 // 振り分け補完用デフォルト値（設定シート未設定時のフォールバック）
+// 食事・服薬は分離項目それぞれに同じデフォルト値を適用する
 const ALLOCATION_DEFAULTS = {
   CHECK_IN: '17:00',
   CHECK_OUT: '08:00',
   TEMPERATURE: 36.5,
-  MEAL: '○',
+  MEAL_DINNER: '○',
+  MEAL_BREAKFAST: '○',
+  MEAL_LUNCH: '−',
   BATH: '○',
   SLEEP: '○',
   BOWEL: '○',
-  MEDICINE: '○',
+  MEDICINE_NIGHT: '○',
+  MEDICINE_MORNING: '○',
   NOTES: '特になし',
 };
 
-// 1日あたりの最大来館数
-const MAX_VISITS_PER_DAY = 7;
+// 1日あたりの最大来館数（設定シート未設定時のフォールバック）
+const DEFAULT_MAX_VISITS_PER_DAY = 7;
 
 // 曜日文字列 → 数値変換マップ（Date.getDay()に対応）
 const DAY_OF_WEEK_MAP = {
@@ -122,29 +155,38 @@ const DAY_OF_WEEK_MAP = {
 };
 
 // 確定来館記録の列インデックス（1始まり）
+// FORM_COL と同じ粒度で食事・服薬を分離する
+// OVERNIGHT_FLAG: 連泊フラグ（ペアリング後、連泊1宿泊から展開された行は true）
 const CONFIRMED_COL = {
   RECORD_DATE: 1,
   CHILD_NAME: 2,
   DATA_TYPE: 3,
-  STAFF_NAME: 4,    // スタッフ1
-  STAFF_NAME_2: 5,  // スタッフ2（任意）
-  CHECK_IN: 6,
-  CHECK_OUT: 7,
+  STAFF_NAME: 4,           // スタッフ1
+  STAFF_NAME_2: 5,         // スタッフ2（任意）
+  CHECK_IN: 6,             // 入所日時（ペアリング後の論理1宿泊の値）
+  CHECK_OUT: 7,            // 退所予定日時（ペアリング後の論理1宿泊の値）
   TEMPERATURE: 8,
-  MEAL: 9,
-  BATH: 10,
-  SLEEP: 11,
-  BOWEL: 12,
-  MEDICINE: 13,
-  NOTES: 14,
+  MEAL_DINNER: 9,          // 夕食
+  MEAL_BREAKFAST: 10,      // 朝食
+  MEAL_LUNCH: 11,          // 昼食
+  BATH: 12,
+  SLEEP: 13,
+  BOWEL: 14,
+  MEDICINE_NIGHT: 15,      // 服薬(夜)
+  MEDICINE_MORNING: 16,    // 服薬(朝)
+  NOTES: 17,
+  OVERNIGHT_FLAG: 18,      // 連泊フラグ（true/false）
 };
 
-// メール本文テンプレート
-var EMAIL_TEMPLATE = [
+// メール件名のデフォルト値（設定シート未設定時のフォールバック）
+const DEFAULT_EMAIL_SUBJECT = '【テスト施設　来館記録のお知らせ】';
+
+// メール本文テンプレートのデフォルト値（設定シート未設定時のフォールバック）
+const DEFAULT_EMAIL_TEMPLATE = [
   '{保護者名} 様',
   '',
   'いつもお世話になっております。',
-  'テスト施設です。',
+  'Yorimadoです。',
   '',
   '{日付}の{児童名}さんの来館記録をお知らせいたします。',
   '',
@@ -152,13 +194,16 @@ var EMAIL_TEMPLATE = [
   '・入所時間: {入所時間}',
   '・退所時間: {退所時間}',
   '・体温: {体温}℃',
-  '・食事: {食事}',
-  '  入浴: {入浴}',
+  '・夕食: {夕食}',
+  '・朝食: {朝食}',
+  '・昼食: {昼食}',
+  '・入浴: {入浴}',
   '・睡眠: {睡眠}',
   '・便: {便}',
-  '・服薬: {服薬}',
+  '・服薬(夜): {服薬(夜)}',
+  '・服薬(朝): {服薬(朝)}',
   '',
-  ' ■ 連絡事項',
+  '■ 連絡事項',
   '・{連絡事項}',
 ].join('\n');
 
@@ -185,6 +230,127 @@ function getSheet(name) {
     throw new Error('シート「' + name + '」が見つかりません');
   }
   return sheet;
+}
+
+// ========================================
+// 汎用ユーティリティ（書式・検証・トリガー・日付）
+// ========================================
+
+/**
+ * ヘッダー行に共通書式（青背景・白太字）と行固定をまとめて適用する
+ * 色を変えたい場合は options で上書きする（バウンスログの赤ヘッダー等）
+ * @param {GoogleAppsScript.Spreadsheet.Range} range 対象セル範囲
+ * @param {number} [frozenRows] 指定があれば setFrozenRows する
+ * @param {{bgColor?:string, fontColor?:string, horizontalAlignment?:string}} [options]
+ */
+function styleSheetHeader_(range, frozenRows, options) {
+  options = options || {};
+  var bg = options.bgColor || '#4285F4';
+  var fc = options.fontColor || '#FFFFFF';
+  range.setBackground(bg).setFontColor(fc).setFontWeight('bold');
+  if (options.horizontalAlignment) {
+    range.setHorizontalAlignment(options.horizontalAlignment);
+  }
+  if (frozenRows && frozenRows > 0) {
+    range.getSheet().setFrozenRows(frozenRows);
+  }
+}
+
+/**
+ * 列幅をマップで一括設定する
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Object} widthMap {列番号: 幅px} 例: {1:40, 2:100}
+ */
+function setColumnWidths_(sheet, widthMap) {
+  Object.keys(widthMap).forEach(function(col) {
+    sheet.setColumnWidth(parseInt(col, 10), widthMap[col]);
+  });
+}
+
+/**
+ * ドロップダウン（requireValueInList）のデータ検証を設定する
+ * @param {GoogleAppsScript.Spreadsheet.Range} range
+ * @param {Array} options 選択肢
+ * @param {boolean} [showDropdown=true] セル内に▼を表示するか
+ */
+function setListValidation_(range, options, showDropdown) {
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(options, showDropdown !== false)
+    .build();
+  range.setDataValidation(rule);
+}
+
+/**
+ * Date値が有効か判定する（Date型かつNaNでない）
+ * @param {*} d
+ * @returns {boolean}
+ */
+function isValidDate_(d) {
+  return (d instanceof Date) && !isNaN(d.getTime());
+}
+
+/**
+ * Date を指定フォーマットで文字列化する（不正値は空文字を返す）
+ * @param {*} date Date値
+ * @param {string} [format='yyyy/MM/dd'] フォーマット
+ * @param {string} [tz] タイムゾーン（省略時は Session.getScriptTimeZone()）
+ * @returns {string}
+ */
+function formatDateYMD_(date, format, tz) {
+  if (!isValidDate_(date)) return '';
+  return Utilities.formatDate(date, tz || Session.getScriptTimeZone(), format || 'yyyy/MM/dd');
+}
+
+/**
+ * 日付を YYYY-MM-DD 形式のキー文字列にする（マップのキー用）
+ * @param {Date} date
+ * @returns {string}
+ */
+function formatDateKey_(date) {
+  var y = date.getFullYear();
+  var m = ('0' + (date.getMonth() + 1)).slice(-2);
+  var d = ('0' + date.getDate()).slice(-2);
+  return y + '-' + m + '-' + d;
+}
+
+/**
+ * 児童マスタを「児童名 → 行データ」のマップに索引化する
+ * @param {string} [filter] 'active'=稼働/休止のみ、未指定=全件
+ * @returns {Object}
+ */
+function buildChildNameToRowMap_(filter) {
+  var data = (filter === 'active') ? getActiveChildren() : getChildMasterData();
+  var map = {};
+  data.forEach(function(row) {
+    var name = row[MASTER_COL.NAME - 1];
+    if (name) map[name] = row;
+  });
+  return map;
+}
+
+/**
+ * 時間ベースのトリガーを再作成する（同名ハンドラの既存トリガーは削除）
+ * @param {string} handlerName 関数名
+ * @param {{everyDays?:number, onMonthDay?:number, atHour?:number}} schedule
+ *   - everyDays: 毎N日 / onMonthDay: 毎月N日（どちらか片方）
+ *   - atHour: 実行時刻（時）
+ */
+function setupTimeTrigger_(handlerName, schedule) {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  var builder = ScriptApp.newTrigger(handlerName).timeBased();
+  if (schedule.onMonthDay) {
+    builder = builder.onMonthDay(schedule.onMonthDay);
+  } else {
+    builder = builder.everyDays(schedule.everyDays || 1);
+  }
+  if (typeof schedule.atHour === 'number') {
+    builder = builder.atHour(schedule.atHour);
+  }
+  builder.create();
 }
 
 /**
@@ -227,34 +393,60 @@ function getFormResponsesByYear(year) {
 /**
  * フォームの回答から指定年月のデータを取得する
  * 入所日時〜退所日時の滞在期間が対象月と重なるレコードも返す（月またぎ連泊対応）
+ * 連泊レコード（入所のみ/退所のみ/両方空欄）は児童名でペアリングし、
+ * ペアリング後の論理1宿泊が対象月と重なる場合に構成全レコードを返す。
  * @param {number} year 年
  * @param {number} month 月（1-12）
  * @returns {Array<Array>} 該当月のフォーム回答データ
  */
 function getFormResponsesByMonth(year, month) {
-  const sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
-  const data = sheet.getDataRange().getValues();
-  var responses = data.slice(1);
+  var allResponses = getFormResponsesAll_();
+  var stays = pairOvernightRecords_(allResponses);
   var monthStart = new Date(year, month - 1, 1);
-  var monthEnd = new Date(year, month, 0); // 月末日
+  var monthEnd = new Date(year, month, 0);
 
-  return responses.filter(function(row) {
-    var checkIn = row[FORM_COL.CHECK_IN - 1];
-    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+  var includeRows = [];
+  var seen = {};
 
-    // 入所/退所日時が両方フル日時（1900年以降）なら滞在期間と対象月の重なりで判定
-    if (checkIn instanceof Date && checkIn.getFullYear() >= 1900) {
-      var stayStart = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
-      var stayEnd = (checkOut instanceof Date && checkOut.getFullYear() >= 1900)
-        ? new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate())
-        : stayStart;
-      return stayStart <= monthEnd && stayEnd >= monthStart;
+  stays.forEach(function(stay) {
+    // ペアリング後の宿泊期間が対象月と重なるか判定
+    var stayStart = stay.checkIn ? new Date(stay.checkIn.getFullYear(), stay.checkIn.getMonth(), stay.checkIn.getDate()) : null;
+    var stayEnd = stay.checkOut ? new Date(stay.checkOut.getFullYear(), stay.checkOut.getMonth(), stay.checkOut.getDate()) : null;
+
+    var overlaps = false;
+    if (stayStart && stayEnd) {
+      overlaps = stayStart <= monthEnd && stayEnd >= monthStart;
+    } else if (stayStart) {
+      overlaps = stayStart <= monthEnd && stayStart >= monthStart;
+    } else if (stayEnd) {
+      overlaps = stayEnd <= monthEnd && stayEnd >= monthStart;
+    } else {
+      // 両方空欄（連泊中日のみで構成）→ 記録日で判定
+      overlaps = stay.recordDate.getFullYear() === year && (stay.recordDate.getMonth() + 1) === month;
     }
 
-    // 時刻のみ・不正値の場合は記録日で判定
-    var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
-    return recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month;
+    if (overlaps) {
+      stay.sourceRows.forEach(function(row) {
+        var key = row[FORM_COL.TIMESTAMP - 1] + '|' + row[FORM_COL.CHILD_NAME - 1];
+        if (!seen[key]) {
+          seen[key] = true;
+          includeRows.push(row);
+        }
+      });
+    }
   });
+
+  return includeRows;
+}
+
+/**
+ * フォームの回答から全データを取得する（ヘッダー除く）
+ * @returns {Array<Array>} 全フォーム回答データ
+ */
+function getFormResponsesAll_() {
+  var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
+  var data = sheet.getDataRange().getValues();
+  return data.slice(1);
 }
 
 /**
@@ -546,44 +738,238 @@ function calcStayDays_(checkIn, checkOut) {
 
 /**
  * 基準日（記録日）と入所/退所日時から宿泊日の Date 配列を返す
- * - 入所/退所が時刻のみ（1899/12/30基準）の場合でも基準日を軸に正しい日付を生成する
- * - 入所日時がフルDate、かつ退所日時もフルDateなら両者の日付差で展開
+ * - 入所/退所が両方フルDateなら入所日付を基準に滞在カレンダー全日を展開（月またぎ対応）
+ * - 入所のみフルDateなら入所日のみ返す
+ * - 両方時刻のみなら recordDate を基準に1日として扱う（後方互換）
  * @param {Date|string} recordDate 基準日（フォームの「記録日」列）
  * @param {Date} checkIn 入所日時
  * @param {Date} checkOut 退所日時
  * @returns {Array<Date>} 各宿泊日の Date 配列
  */
 function expandStayToDates_(recordDate, checkIn, checkOut) {
-  var base = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
-  if (isNaN(base.getTime())) {
-    // recordDate が使えない場合は checkIn にフォールバック（後方互換）
-    if (checkIn instanceof Date && !isNaN(checkIn.getTime())) {
-      base = checkIn;
-    } else {
-      return [];
-    }
-  }
+  var hasCheckIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
+  var hasCheckOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
 
-  // 入所日時・退所日時が両方フルDate（1900年以降）なら差分で日数算出
-  // それ以外（時刻のみ等）は 1 日として扱う
-  var n = 1;
-  if (checkIn instanceof Date && checkOut instanceof Date
-      && checkIn.getFullYear() >= 1900 && checkOut.getFullYear() >= 1900) {
-    var inMid = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+  // 両方フルDate: 入所日基準で滞在カレンダー全日を展開
+  if (hasCheckIn && hasCheckOut) {
+    var base = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
     var outMid = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
-    var diff = Math.round((outMid - inMid) / 86400000);
-    n = Math.max(1, diff + 1);
+    var diff = Math.round((outMid - base) / 86400000);
+    var n = Math.max(1, diff + 1);
+    var result = [];
+    for (var i = 0; i < n; i++) {
+      result.push(new Date(base.getFullYear(), base.getMonth(), base.getDate() + i));
+    }
+    return result;
   }
 
-  var result = [];
-  for (var i = 0; i < n; i++) {
-    result.push(new Date(base.getFullYear(), base.getMonth(), base.getDate() + i));
+  // 入所のみフルDate: その日付のみ返す
+  if (hasCheckIn && !hasCheckOut) {
+    return [new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate())];
   }
-  return result;
+
+  // 退所のみフルDate: その日付のみ返す
+  if (!hasCheckIn && hasCheckOut) {
+    return [new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate())];
+  }
+
+  // 両方時刻のみ・不正値: recordDate を基準に1日として扱う（後方互換）
+  var base2 = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
+  if (isNaN(base2.getTime())) return [];
+  return [new Date(base2.getFullYear(), base2.getMonth(), base2.getDate())];
 }
 
 /**
- * 設定シートのC列から指定行の値を取得する
+ * フォーム回答を「論理1宿泊」単位にペアリングする（連泊対応）
+ *
+ * 連泊フラグONのレコードは入所/退所欄の充填パターンに基づきペアリングする:
+ *   - 入所あり・退所空欄 → 連泊開始（次の「入所空欄・退所あり」と対をなす）
+ *   - 入所空欄・退所空欄 → 連泊中日（開始済み連泊に紐付く）
+ *   - 入所空欄・退所あり → 連泊終了（直近の開始とペアになり1宿泊として確定）
+ *   - 入所あり・退所あり → 単泊扱い（誤入力の可能性、bounce-checker で警告）
+ *
+ * 連泊フラグOFFのレコードは単泊として独立した1宿泊。
+ *
+ * @param {Array<Array>} formResponses フォーム回答データ（ヘッダー除く）
+ * @returns {Array<{
+ *   childName: string,
+ *   checkIn: Date|null,
+ *   checkOut: Date|null,
+ *   recordDate: Date,
+ *   isOvernight: boolean,
+ *   sourceRows: Array<Array>,
+ *   primaryRow: Array,
+ *   issues: Array<string>
+ * }>} 論理1宿泊のリスト
+ */
+function pairOvernightRecords_(formResponses) {
+  // 児童ごとにグループ化
+  var byChild = {};
+  formResponses.forEach(function(row, idx) {
+    var name = row[FORM_COL.CHILD_NAME - 1];
+    if (!name) return;
+    if (!byChild[name]) byChild[name] = [];
+    byChild[name].push({ row: row, idx: idx });
+  });
+
+  var stays = [];
+  Object.keys(byChild).forEach(function(name) {
+    var records = byChild[name];
+    // 記録日昇順でソート（同日内はインデックス順=入力順）
+    records.sort(function(a, b) {
+      var da = new Date(a.row[FORM_COL.RECORD_DATE - 1]);
+      var db = new Date(b.row[FORM_COL.RECORD_DATE - 1]);
+      var t = da.getTime() - db.getTime();
+      return t !== 0 ? t : (a.idx - b.idx);
+    });
+
+    var openStay = null; // 連泊オープン中の宿泊
+    records.forEach(function(rec) {
+      var row = rec.row;
+      var isOvernightFlag = isOvernightRow_(row);
+      var checkIn = row[FORM_COL.CHECK_IN - 1];
+      var checkOut = row[FORM_COL.CHECK_OUT - 1];
+      var hasCheckIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
+      var hasCheckOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
+      var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
+
+      if (!isOvernightFlag) {
+        // 単泊
+        if (openStay) {
+          // オープン中の連泊が閉じる前に単泊が来た → 連泊終了レコード未送信
+          openStay.issues.push('連泊終了レコード未送信（次の単泊で打ち切り）');
+          stays.push(openStay);
+          openStay = null;
+        }
+        stays.push({
+          childName: name,
+          checkIn: hasCheckIn ? checkIn : null,
+          checkOut: hasCheckOut ? checkOut : null,
+          recordDate: recordDate,
+          isOvernight: false,
+          sourceRows: [row],
+          primaryRow: row,
+          issues: [],
+        });
+        return;
+      }
+
+      // 連泊フラグON
+      if (hasCheckIn && hasCheckOut) {
+        // 誤入力: 連泊なのに両方記入 → 単泊扱い + 警告
+        var stay = {
+          childName: name,
+          checkIn: checkIn,
+          checkOut: checkOut,
+          recordDate: recordDate,
+          isOvernight: true,
+          sourceRows: [row],
+          primaryRow: row,
+          issues: ['連泊ONだが入所/退所両方記入（単泊なら連泊OFFに、連泊なら片方を空欄に）'],
+        };
+        if (openStay) {
+          openStay.issues.push('連泊終了レコード未送信（誤入力レコードで打ち切り）');
+          stays.push(openStay);
+          openStay = null;
+        }
+        stays.push(stay);
+        return;
+      }
+
+      if (hasCheckIn && !hasCheckOut) {
+        // 連泊開始
+        if (openStay) {
+          openStay.issues.push('連泊終了レコード未送信（次の連泊開始で打ち切り）');
+          stays.push(openStay);
+        }
+        openStay = {
+          childName: name,
+          checkIn: checkIn,
+          checkOut: null,
+          recordDate: recordDate,
+          isOvernight: true,
+          sourceRows: [row],
+          primaryRow: row,
+          issues: [],
+        };
+        return;
+      }
+
+      if (!hasCheckIn && hasCheckOut) {
+        // 連泊終了
+        if (openStay) {
+          openStay.checkOut = checkOut;
+          openStay.recordDate = recordDate; // 最終レコードの記録日に更新
+          openStay.sourceRows.push(row);
+          stays.push(openStay);
+          openStay = null;
+        } else {
+          // 開始のないまま終了 → 孤立
+          stays.push({
+            childName: name,
+            checkIn: null,
+            checkOut: checkOut,
+            recordDate: recordDate,
+            isOvernight: true,
+            sourceRows: [row],
+            primaryRow: row,
+            issues: ['連泊開始レコード未送信（孤立した連泊終了）'],
+          });
+        }
+        return;
+      }
+
+      // 両方空欄（連泊中日）
+      if (openStay) {
+        openStay.sourceRows.push(row);
+      } else {
+        // 開始のないまま中日 → 孤立
+        stays.push({
+          childName: name,
+          checkIn: null,
+          checkOut: null,
+          recordDate: recordDate,
+          isOvernight: true,
+          sourceRows: [row],
+          primaryRow: row,
+          issues: ['連泊開始レコード未送信（孤立した連泊中日）'],
+        });
+      }
+    });
+
+    // 児童ループ終了時にクローズされていない連泊が残っていれば孤立として出力
+    if (openStay) {
+      openStay.issues.push('連泊終了レコード未送信（オープンのまま）');
+      stays.push(openStay);
+    }
+  });
+
+  // 全体を記録日昇順で返す
+  stays.sort(function(a, b) {
+    var t = a.recordDate.getTime() - b.recordDate.getTime();
+    return t !== 0 ? t : a.childName.localeCompare(b.childName);
+  });
+  return stays;
+}
+
+/**
+ * フォーム/確定来館記録の行が連泊フラグONかを判定する
+ * @param {Array} row フォーム回答 or 確定来館記録の1行
+ * @param {boolean} [fromConfirmed=false] true=CONFIRMED_COL基準、false=FORM_COL基準
+ * @returns {boolean}
+ */
+function isOvernightRow_(row, fromConfirmed) {
+  var col = fromConfirmed ? CONFIRMED_COL.OVERNIGHT_FLAG : FORM_COL.OVERNIGHT_FLAG;
+  var v = row[col - 1];
+  if (v === true) return true;
+  if (v === false || v === '' || v == null) return false;
+  var s = String(v).trim().toLowerCase();
+  return s === 'true' || s === 'on' || s === '1' || s === '連泊' || s === '○' || s === 'はい';
+}
+
+/**
+ * 設定シートのB列（値）から指定行の値を取得する
+ * 列レイアウト: A=項目名 / B=値 / C=備考（setupSettingsSheet_ と対応）
  * @param {number} row 行番号
  * @returns {*} 設定値（シートが存在しない場合はnull）
  */
@@ -591,7 +977,7 @@ function getSettingValue_(row) {
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.SETTINGS);
     if (!sheet) return null;
-    return sheet.getRange(row, 3).getValue();
+    return sheet.getRange(row, 2).getValue();
   } catch (e) {
     return null;
   }
@@ -653,7 +1039,9 @@ function getDummyStaffName_() {
 
 /**
  * 振り分け補完値を設定シートから取得する
- * 設定シート未設定の項目は ALLOCATION_DEFAULTS にフォールバックする
+ * 食事（夕/朝/昼）・服薬（朝/夜）は設定シートの個別行を読む。
+ * 設定シート未設定の項目は ALLOCATION_DEFAULTS にフォールバックする。
+ *
  * @returns {Object} 補完値オブジェクト
  */
 function getAllocationDefaultsFromSettings_() {
@@ -665,13 +1053,79 @@ function getAllocationDefaultsFromSettings_() {
     CHECK_IN: pick(SETTINGS_ROW.CHECK_IN, ALLOCATION_DEFAULTS.CHECK_IN),
     CHECK_OUT: pick(SETTINGS_ROW.CHECK_OUT, ALLOCATION_DEFAULTS.CHECK_OUT),
     TEMPERATURE: pick(SETTINGS_ROW.TEMPERATURE, ALLOCATION_DEFAULTS.TEMPERATURE),
-    MEAL: pick(SETTINGS_ROW.MEAL, ALLOCATION_DEFAULTS.MEAL),
+    MEAL_DINNER: pick(SETTINGS_ROW.MEAL_DINNER, ALLOCATION_DEFAULTS.MEAL_DINNER),
+    MEAL_BREAKFAST: pick(SETTINGS_ROW.MEAL_BREAKFAST, ALLOCATION_DEFAULTS.MEAL_BREAKFAST),
+    MEAL_LUNCH: pick(SETTINGS_ROW.MEAL_LUNCH, ALLOCATION_DEFAULTS.MEAL_LUNCH),
     BATH: pick(SETTINGS_ROW.BATH, ALLOCATION_DEFAULTS.BATH),
     SLEEP: pick(SETTINGS_ROW.SLEEP, ALLOCATION_DEFAULTS.SLEEP),
     BOWEL: pick(SETTINGS_ROW.BOWEL, ALLOCATION_DEFAULTS.BOWEL),
-    MEDICINE: pick(SETTINGS_ROW.MEDICINE, ALLOCATION_DEFAULTS.MEDICINE),
+    MEDICINE_NIGHT: pick(SETTINGS_ROW.MEDICINE_NIGHT, ALLOCATION_DEFAULTS.MEDICINE_NIGHT),
+    MEDICINE_MORNING: pick(SETTINGS_ROW.MEDICINE_MORNING, ALLOCATION_DEFAULTS.MEDICINE_MORNING),
     NOTES: pick(SETTINGS_ROW.NOTES, ALLOCATION_DEFAULTS.NOTES),
   };
+}
+
+/**
+ * 設定シートから1日最大来館数を取得する
+ * 未設定・不正値の場合は DEFAULT_MAX_VISITS_PER_DAY を返す
+ * @returns {number} 1日最大来館数
+ */
+function getMaxVisitsPerDay_() {
+  var v = getSettingValue_(SETTINGS_ROW.MAX_VISITS_PER_DAY);
+  var n = parseInt(v, 10);
+  return (isNaN(n) || n <= 0) ? DEFAULT_MAX_VISITS_PER_DAY : n;
+}
+
+/**
+ * 設定シートからメール件名を取得する
+ * 未設定の場合は DEFAULT_EMAIL_SUBJECT を返す
+ * @returns {string} メール件名
+ */
+function getEmailSubjectFromSettings_() {
+  var v = getSettingValue_(SETTINGS_ROW.EMAIL_SUBJECT);
+  var s = (v === null || typeof v === 'undefined') ? '' : String(v).trim();
+  return s || DEFAULT_EMAIL_SUBJECT;
+}
+
+/**
+ * 設定シートからメール本文テンプレートを取得する
+ * 未設定の場合は DEFAULT_EMAIL_TEMPLATE を返す
+ * @returns {string} メール本文テンプレート
+ */
+function getEmailBodyFromSettings_() {
+  var v = getSettingValue_(SETTINGS_ROW.EMAIL_BODY);
+  var s = (v === null || typeof v === 'undefined') ? '' : String(v);
+  return s.trim() ? s : DEFAULT_EMAIL_TEMPLATE;
+}
+
+/**
+ * 設定シートからエラー通知先メール（カンマ区切り）を配列で取得する
+ * @returns {Array<string>} メールアドレスの配列（空要素除く）
+ */
+function getErrorEmailsFromSettings_() {
+  var v = getSettingValue_(SETTINGS_ROW.ERROR_EMAIL);
+  if (!v) return [];
+  return String(v).split(/[,、，\s]+/).map(function(e) { return e.trim(); }).filter(function(e) { return !!e; });
+}
+
+/**
+ * 定型文マスタシートから連絡事項のレパートリーを取得する
+ * @returns {Array<string>} 定型文の配列（ヘッダー除く、空行除く）
+ */
+function getNotesMasterData_() {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.NOTES_MASTER);
+    if (!sheet) return [];
+    var data = sheet.getDataRange().getValues();
+    var notes = [];
+    for (var i = 1; i < data.length; i++) {
+      var note = String(data[i][0] || '').trim();
+      if (note) notes.push(note);
+    }
+    return notes;
+  } catch (e) {
+    return [];
+  }
 }
 
 /**
@@ -687,16 +1141,10 @@ function logError_(functionName, error) {
     // ログシートが存在しない場合は自動作成
     if (!sheet) {
       sheet = ss.insertSheet(SHEET_NAMES.LOG);
-      sheet.getRange(1, 1, 1, 4).setValues([['タイムスタンプ', '関数名', 'エラーメッセージ', 'スタックトレース']]);
-      sheet.getRange(1, 1, 1, 4)
-        .setBackground('#4285F4')
-        .setFontColor('#FFFFFF')
-        .setFontWeight('bold');
-      sheet.setFrozenRows(1);
-      sheet.setColumnWidth(1, 160);
-      sheet.setColumnWidth(2, 200);
-      sheet.setColumnWidth(3, 400);
-      sheet.setColumnWidth(4, 400);
+      var logHeaderRange = sheet.getRange(1, 1, 1, 4);
+      logHeaderRange.setValues([['タイムスタンプ', '関数名', 'エラーメッセージ', 'スタックトレース']]);
+      styleSheetHeader_(logHeaderRange, 1);
+      setColumnWidths_(sheet, { 1: 160, 2: 200, 3: 400, 4: 400 });
     }
 
     var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
@@ -708,3 +1156,38 @@ function logError_(functionName, error) {
     Logger.log('ログ出力に失敗: ' + e.message);
   }
 }
+
+/**
+ * WebView アクセストークンを検証する
+ * @param {string} token クエリパラメータ / クライアントから渡されたトークン
+ * @returns {{email: string, name: string}|null} 有効ならユーザー情報、無効なら null
+ */
+function validateToken_(token) {
+  if (!token) return null;
+  var normalized = String(token).trim();
+  if (!normalized) return null;
+
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.ALLOWED_USERS);
+    if (!sheet) return null;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < ALLOWED_USERS_DATA_START_ROW) return null;
+
+    var numRows = lastRow - ALLOWED_USERS_DATA_START_ROW + 1;
+    var values = sheet.getRange(ALLOWED_USERS_DATA_START_ROW, 1, numRows, ALLOWED_USERS_COL.NOTE).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var rowToken = String(values[i][ALLOWED_USERS_COL.TOKEN - 1] || '').trim();
+      var active = values[i][ALLOWED_USERS_COL.ACTIVE - 1];
+      if (rowToken && rowToken === normalized && active === true) {
+        return {
+          email: String(values[i][ALLOWED_USERS_COL.EMAIL - 1] || ''),
+          name: String(values[i][ALLOWED_USERS_COL.NAME - 1] || ''),
+        };
+      }
+    }
+  } catch (e) {
+    logError_('validateToken_', e);
+  }
+  return null;
+}
+

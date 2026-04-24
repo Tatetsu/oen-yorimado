@@ -14,12 +14,13 @@
 function updateConfirmedVisits(year, month) {
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
   var filterByMonth = (year !== undefined && month !== undefined);
+  var colCount = CONFIRMED_COL.OVERNIGHT_FLAG; // 列数=末尾(OVERNIGHT_FLAG=18)
 
   // 既存データを全件取得
   var lastRow = sheet.getLastRow();
   var existingData = [];
   if (lastRow >= CONFIRMED_DATA_START_ROW) {
-    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 14).getValues();
+    existingData = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, colCount).getValues();
   }
 
   // 既存データを「残す行」と「置き換える行」に分離
@@ -42,44 +43,60 @@ function updateConfirmedVisits(year, month) {
     });
   }
 
-  // フォームの回答から実データを取得（月指定あり→対象月のみ、なし→全件）
-  var formData = filterByMonth ? getFormResponsesByMonth(year, month) : getFormResponsesAll_();
-  var newRows = [];
-  formData.forEach(function(row) {
-    var recordDate = row[FORM_COL.RECORD_DATE - 1];
-    var checkIn = row[FORM_COL.CHECK_IN - 1];
-    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+  // 全期間の回答からペアリング → 月指定で絞り込み
+  var allResponses = getFormResponsesAll_();
+  var allStays = pairOvernightRecords_(allResponses);
 
-    // 入所日時・退所日時が時刻のみの場合、記録日と合体してフル日時化する
-    var baseDate = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
-    var checkInFull = toDateTimeOnDate_(baseDate, checkIn);
-    var checkOutFull = toDateTimeOnDate_(baseDate, checkOut);
-    if (checkOutFull.getTime() <= checkInFull.getTime()) {
-      checkOutFull = new Date(checkOutFull.getTime() + 24 * 60 * 60 * 1000);
+  var newRows = [];
+  allStays.forEach(function(stay) {
+    // ペアリング後の論理1宿泊から、滞在カレンダー全日に展開
+    var checkIn = stay.checkIn;
+    var checkOut = stay.checkOut;
+    var recordDate = stay.recordDate;
+    var primary = stay.primaryRow;
+
+    // フル日時が両方そろっている場合はそのまま、片方欠けている場合はフォールバック
+    var checkInFull = checkIn;
+    var checkOutFull = checkOut;
+    if (!(checkInFull instanceof Date) || !(checkOutFull instanceof Date)) {
+      // 時刻のみ・欠損のフォールバック（後方互換）
+      var baseDate = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
+      if (!(checkInFull instanceof Date)) {
+        checkInFull = checkIn ? toDateTimeOnDate_(baseDate, checkIn) : null;
+      }
+      if (!(checkOutFull instanceof Date)) {
+        checkOutFull = checkOut ? toDateTimeOnDate_(baseDate, checkOut) : null;
+      }
+      if (checkInFull && checkOutFull && checkOutFull.getTime() <= checkInFull.getTime()) {
+        checkOutFull = new Date(checkOutFull.getTime() + 24 * 60 * 60 * 1000);
+      }
     }
 
-    // 宿泊日数分の行に展開（1泊2日なら2行、同日なら1行）
-    var stayDates = expandStayToDates_(recordDate, checkIn, checkOut);
+    var stayDates = expandStayToDates_(recordDate, checkInFull, checkOutFull);
     stayDates.forEach(function(stayDate) {
-      // 月指定がある場合、対象月外の日付（翌月へ跨ぎなど）は除外
+      // 月指定がある場合、対象月外の日付は除外
       if (filterByMonth && (stayDate.getFullYear() !== year || (stayDate.getMonth() + 1) !== month)) {
         return;
       }
       newRows.push([
-        stayDate,                              // 記録日（宿泊日ごとに展開）
-        row[FORM_COL.CHILD_NAME - 1],         // 児童名
-        '実データ',                             // データ区分
-        row[FORM_COL.STAFF_NAME - 1],         // スタッフ1
-        row[FORM_COL.STAFF_NAME_2 - 1],       // スタッフ2（任意・空欄の場合あり）
-        checkInFull,                           // 入所日時（記録日 + 時刻）
-        checkOutFull,                          // 退所日時（記録日 + 時刻、必要に応じて翌日）
-        row[FORM_COL.TEMPERATURE - 1],        // 体温
-        row[FORM_COL.MEAL - 1],               // 食事
-        row[FORM_COL.BATH - 1],               // 入浴
-        row[FORM_COL.SLEEP - 1],              // 睡眠
-        row[FORM_COL.BOWEL - 1],              // 便
-        row[FORM_COL.MEDICINE - 1],           // 服薬
-        row[FORM_COL.NOTES - 1],              // その他連絡事項
+        stayDate,                                  // 記録日（宿泊日ごとに展開）
+        primary[FORM_COL.CHILD_NAME - 1],         // 児童名
+        '実データ',                                 // データ区分
+        primary[FORM_COL.STAFF_NAME - 1],         // スタッフ1
+        primary[FORM_COL.STAFF_NAME_2 - 1],       // スタッフ2（任意・空欄の場合あり）
+        checkInFull,                               // 入所日時（ペアリング後の値）
+        checkOutFull,                              // 退所予定日時（ペアリング後の値）
+        primary[FORM_COL.TEMPERATURE - 1],        // 体温
+        primary[FORM_COL.MEAL_DINNER - 1],        // 夕食
+        primary[FORM_COL.MEAL_BREAKFAST - 1],     // 朝食
+        primary[FORM_COL.MEAL_LUNCH - 1],         // 昼食
+        primary[FORM_COL.BATH - 1],               // 入浴
+        primary[FORM_COL.SLEEP - 1],              // 睡眠
+        primary[FORM_COL.BOWEL - 1],              // 便
+        primary[FORM_COL.MEDICINE_NIGHT - 1],     // 服薬(夜)
+        primary[FORM_COL.MEDICINE_MORNING - 1],   // 服薬(朝)
+        primary[FORM_COL.NOTES - 1],              // その他連絡事項
+        stay.isOvernight ? true : false,          // 連泊フラグ
       ]);
     });
   });
@@ -88,7 +105,7 @@ function updateConfirmedVisits(year, month) {
 
   // 既存データをクリア（ヘッダーは残す）
   if (lastRow >= CONFIRMED_DATA_START_ROW) {
-    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 14).clearContent();
+    sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, colCount).clearContent();
   }
 
   if (allData.length === 0) {
@@ -104,7 +121,7 @@ function updateConfirmedVisits(year, month) {
   });
 
   // 書き込み
-  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 14).setValues(allData);
+  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, colCount).setValues(allData);
 
   // 記録日列の表示形式
   sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 1)
@@ -116,14 +133,4 @@ function updateConfirmedVisits(year, month) {
 
   var scopeMsg = filterByMonth ? (year + '年' + month + '月分') : '全期間';
   Logger.log('確定来館記録を更新しました（' + scopeMsg + '）: ' + allData.length + '件');
-}
-
-/**
- * フォームの回答から全データを取得する（ヘッダー除く）
- * @returns {Array<Array>} 全フォーム回答データ
- */
-function getFormResponsesAll_() {
-  var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
-  var data = sheet.getDataRange().getValues();
-  return data.slice(1);
 }

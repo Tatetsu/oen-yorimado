@@ -89,21 +89,28 @@ function collectFormResponsesByScope_(scope) {
 }
 
 /**
- * スコープに合致する日数を児童名ごとに数える（連泊は宿泊日ごとに1カウント）
+ * スコープに合致する日数を児童名ごとに数える（連泊は宿泊カレンダー全日をカウント）
+ * 連泊2レコード等はペアリングして1宿泊として扱い、開始日〜終了日を1カウントずつ加算する。
+ * 同一日が複数の論理1宿泊で重複するケース（運用上想定外）は1日として数える。
  * @param {Array<Array>} formResponses フォーム回答データ
  * @param {{type: string, year?: number, month?: number}} scope
  * @returns {Object} {児童名: 日数}
  */
 function countVisitsByScope_(formResponses, scope) {
   var counts = {};
-  formResponses.forEach(function(row) {
-    var childName = row[FORM_COL.CHILD_NAME - 1];
+  var seenByChild = {}; // {児童名: {日付キー: true}} 同日重複防止
+  var stays = pairOvernightRecords_(formResponses);
+  stays.forEach(function(stay) {
+    var childName = stay.childName;
     if (!childName) return;
-    var stayDates = expandStayToDates_(row[FORM_COL.RECORD_DATE - 1], row[FORM_COL.CHECK_IN - 1], row[FORM_COL.CHECK_OUT - 1]);
+    if (!seenByChild[childName]) seenByChild[childName] = {};
+    var stayDates = expandStayToDates_(stay.recordDate, stay.checkIn, stay.checkOut);
     stayDates.forEach(function(d) {
-      if (matchesScope_(d, scope)) {
-        counts[childName] = (counts[childName] || 0) + 1;
-      }
+      if (!matchesScope_(d, scope)) return;
+      var key = formatDateKey_(d);
+      if (seenByChild[childName][key]) return;
+      seenByChild[childName][key] = true;
+      counts[childName] = (counts[childName] || 0) + 1;
     });
   });
   return counts;

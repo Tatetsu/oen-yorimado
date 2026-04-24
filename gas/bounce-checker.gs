@@ -18,7 +18,7 @@
 function collectBounceEmails() {
   try {
     var lastCheckDate = getLastBounceCheckDate_();
-    var afterStr = Utilities.formatDate(lastCheckDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    var afterStr = formatDateYMD_(lastCheckDate);
 
     // mailer-daemon または postmaster からのメールを検索
     var query = 'from:(mailer-daemon OR postmaster) after:' + afterStr;
@@ -37,7 +37,6 @@ function collectBounceEmails() {
     var sheet = setupBounceLogSheet_();
 
     var newCount = 0;
-    var tz = Session.getScriptTimeZone();
 
     for (var i = 0; i < threads.length; i++) {
       var messages = threads[i].getMessages();
@@ -55,8 +54,8 @@ function collectBounceEmails() {
         if (!recipient) continue;
 
         var childName = emailToChildMap[recipient.toLowerCase()] || '（マスタ未登録）';
-        var detectedAt = Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm');
-        var bouncedAt = Utilities.formatDate(msgDate, tz, 'yyyy/MM/dd HH:mm');
+        var detectedAt = formatDateYMD_(new Date(), 'yyyy/MM/dd HH:mm');
+        var bouncedAt = formatDateYMD_(msgDate, 'yyyy/MM/dd HH:mm');
 
         sheet.appendRow([detectedAt, bouncedAt, recipient, childName, subject, '未対応']);
         newCount++;
@@ -97,18 +96,11 @@ function setupBounceLogSheet_() {
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAMES.BOUNCE_LOG);
     var headers = ['検出日時', 'バウンス発生日時', '送信先メールアドレス', '児童名', 'バウンスメール件名', '対応状況'];
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.getRange(1, 1, 1, headers.length)
-      .setBackground('#E53935')
-      .setFontColor('#FFFFFF')
-      .setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    sheet.setColumnWidth(1, 150);
-    sheet.setColumnWidth(2, 150);
-    sheet.setColumnWidth(3, 220);
-    sheet.setColumnWidth(4, 120);
-    sheet.setColumnWidth(5, 300);
-    sheet.setColumnWidth(6, 100);
+    var headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setValues([headers]);
+    // バウンスログはエラー系シートのため赤ヘッダー
+    styleSheetHeader_(headerRange, 1, { bgColor: '#E53935' });
+    setColumnWidths_(sheet, { 1: 150, 2: 150, 3: 220, 4: 120, 5: 300, 6: 100 });
   }
 
   return sheet;
@@ -222,22 +214,84 @@ function saveLastBounceCheckDate_(date) {
 }
 
 /**
- * バウンスチェックの時間トリガーを設定する（毎日9時）
+ * 連泊レコードのバリデーションを実行し、孤立・誤入力を検知する
+ * 月次一括処理の冒頭で呼び出すことを想定
+ * @param {number} [year] 対象年（省略時は全期間）
+ * @param {number} [month] 対象月 1-12（省略時は全期間）
+ * @returns {Array<{childName: string, recordDate: Date, issues: Array<string>}>}
  */
-function setupBounceCheckTrigger() {
-  var triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === 'collectBounceEmails') {
-      ScriptApp.deleteTrigger(trigger);
+function validateOvernightRecords(year, month) {
+  var allResponses = getFormResponsesAll_();
+  var stays = pairOvernightRecords_(allResponses);
+
+  var filterByMonth = (year !== undefined && month !== undefined);
+  var monthStart = filterByMonth ? new Date(year, month - 1, 1) : null;
+  var monthEnd = filterByMonth ? new Date(year, month, 0) : null;
+
+  // 連泊長期化（開始から OVERNIGHT_MAX_DAYS 日経過しても未終了）の閾値
+  var OVERNIGHT_MAX_DAYS = 14;
+
+  var issues = [];
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  stays.forEach(function(stay) {
+    // 連泊長期化チェック
+    if (stay.isOvernight && stay.checkIn instanceof Date && !stay.checkOut) {
+      var diffDays = Math.floor((today - stay.checkIn) / 86400000);
+      if (diffDays >= OVERNIGHT_MAX_DAYS) {
+        stay.issues = stay.issues || [];
+        stay.issues.push('連泊開始から' + diffDays + '日経過しても終了レコードなし');
+      }
+    }
+
+    // 単泊なのに入退所どちらかが空欄
+    if (!stay.isOvernight) {
+      if (!stay.checkIn || !stay.checkOut) {
+        stay.issues = stay.issues || [];
+        stay.issues.push('単泊（連泊OFF）なのに入所/退所のどちらかが空欄');
+      }
+    }
+
+    if (stay.issues && stay.issues.length > 0) {
+      // 月フィルタ: 該当月と無関係なら除外
+      if (filterByMonth) {
+        var staySpan = stay.checkIn || stay.checkOut || stay.recordDate;
+        if (!(staySpan instanceof Date)) return;
+        var spanStart = stay.checkIn || stay.recordDate;
+        var spanEnd = stay.checkOut || stay.recordDate;
+        if (spanEnd < monthStart || spanStart > monthEnd) return;
+      }
+      issues.push({
+        childName: stay.childName,
+        recordDate: stay.recordDate,
+        issues: stay.issues.slice(),
+      });
     }
   });
 
-  ScriptApp.newTrigger('collectBounceEmails')
-    .timeBased()
-    .everyDays(1)
-    .atHour(9)
-    .create();
+  return issues;
+}
 
+/**
+ * 連泊バリデーション結果をログに書き出して通知する（手動実行用）
+ */
+function runOvernightValidationManual() {
+  var issues = validateOvernightRecords();
+  if (issues.length === 0) {
+    SpreadsheetApp.getUi().alert('連泊レコード検証', '問題は検出されませんでした。', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  var lines = issues.map(function(it) {
+    return '・' + formatDateYMD_(it.recordDate) + ' ' + it.childName + ': ' + it.issues.join(' / ');
+  });
+  SpreadsheetApp.getUi().alert('連泊レコード検証（' + issues.length + '件）', lines.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * バウンスチェックの時間トリガーを設定する（毎日9時）
+ */
+function setupBounceCheckTrigger() {
+  setupTimeTrigger_('collectBounceEmails', { everyDays: 1, atHour: 9 });
   Logger.log('バウンスチェックトリガーを設定しました（毎日9時）');
-  SpreadsheetApp.getUi().alert('バウンスチェックトリガーを設定しました（毎日9時）');
 }

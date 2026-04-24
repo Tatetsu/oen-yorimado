@@ -16,13 +16,14 @@
 
 | ファイル | 内容 |
 |---------|------|
-| [specs/google-form.md](specs/google-form.md) | フォームの質問項目・列定義・プルダウン同期の仕組み・スクリプトプロパティ |
+| [specs/google-form.md](specs/google-form.md) | フォームの質問項目・列定義・プルダウン同期の仕組み・スクリプトプロパティ（2026-04に食事3分離/服薬2分離へ更新） |
 | [specs/allocation-logic.md](specs/allocation-logic.md) | 振り分けロジック詳細（優先度・±1ランダム幅・年間枠按分・補完値算出・均等分散） |
 | [specs/overnight-logic.md](specs/overnight-logic.md) | 連泊展開ロジック・月またぎカウントルール |
 | [specs/aggregation-logic.md](specs/aggregation-logic.md) | スコープ4種の挙動・月別集計/児童別ビュー/カレンダーのデータソース |
 | [specs/email-notification.md](specs/email-notification.md) | 保護者メール・メール本文テンプレート・バウンス検出・エラー通知 |
 | [specs/triggers.md](specs/triggers.md) | 全トリガー一覧（時間・onEdit・メニュー）とトリガー設定手順 |
 | [specs/child-special-rules.md](specs/child-special-rules.md) | 個別児童の特殊対応ルール（送迎順序・迎え不要曜日） |
+| [specs/unresolved-rules.md](specs/unresolved-rules.md) | GAS未実装 / Python側のみ実装のルール集約（他サービス併給・重度支援加算・送迎記録表・2026-04 食事/服薬分離の移行） |
 
 ---
 

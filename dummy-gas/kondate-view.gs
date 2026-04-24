@@ -102,12 +102,14 @@ function drawKondateCalendar_(view, yearMonth, dateMap) {
 
   var CAL_START_COL = 4; // D列スタート（A〜C列を汚染しない）
 
-  // 曜日ヘッダー（D列から）
+  // 曜日ヘッダー（D列から） 月〜金=無色 / 土=青系 / 日=赤系
+  var headerBgs = [["#E8E8E8", "#E8E8E8", "#E8E8E8", "#E8E8E8", "#E8E8E8", "#5B9BD5", "#C94C4C"]];
+  var headerFontColors = [["#333333", "#333333", "#333333", "#333333", "#333333", "#FFFFFF", "#FFFFFF"]];
   view.getRange(KONDATE_HEADER_ROW, CAL_START_COL, 1, 7)
     .setValues([KONDATE_DAY_LABELS])
     .setFontWeight("bold")
-    .setBackground("#4A86C8")
-    .setFontColor("#FFFFFF")
+    .setBackgrounds(headerBgs)
+    .setFontColors(headerFontColors)
     .setHorizontalAlignment("center");
 
   // カレンダー列幅（D〜J列）
@@ -139,11 +141,15 @@ function drawKondateCalendar_(view, yearMonth, dateMap) {
     }
     startCol = 0;
 
+    // 日付行: 月〜金=無色 / 土=淡い青 / 日=淡い赤
+    var dateBgs = [["#F0F0F0", "#F0F0F0", "#F0F0F0", "#F0F0F0", "#F0F0F0", "#D6E6F5", "#FCE4E4"]];
+    var dateColors = [["#000000", "#000000", "#000000", "#000000", "#000000", "#1F4E79", "#B22222"]];
     view.getRange(currentRow, CAL_START_COL, 1, 7)
       .setNumberFormat("@")
       .setValues([rowDate])
       .setFontWeight("bold")
-      .setBackground("#E8F0FE")
+      .setBackgrounds(dateBgs)
+      .setFontColors(dateColors)
       .setHorizontalAlignment("center");
     view.getRange(currentRow + 1, CAL_START_COL, 1, 7).setValues([rowMain]).setBackground("#FFFFFF").setFontWeight("normal").setHorizontalAlignment("left");
     view.getRange(currentRow + 2, CAL_START_COL, 1, 7).setValues([rowVeg]).setBackground("#FFFFFF").setHorizontalAlignment("left");

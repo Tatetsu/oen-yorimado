@@ -6,6 +6,11 @@
 var FORM_TITLE_STAFF1 = 'スタッフ1';
 var FORM_TITLE_STAFF2 = 'スタッフ2';
 var FORM_TITLE_CHILD = '児童名';
+var FORM_TITLE_CHECK_IN = '入所日時';
+var FORM_TITLE_CHECK_OUT_OLD = '退所日時';
+var FORM_TITLE_CHECK_OUT = '退所予定日時';
+var FORM_TITLE_OVERNIGHT = '連泊';
+var FORM_HELP_OVERNIGHT = '連泊の場合はチェック。初日は退所予定空欄／中日は両方空欄／最終日は入所空欄で送信してください。';
 
 /**
  * フォームのドロップダウンをマスタデータで更新する
@@ -34,10 +39,54 @@ function syncFormDropdowns() {
       setListChoices_(item, staffNames);
     } else if (title === FORM_TITLE_CHILD) {
       setListChoices_(item, childNames);
+    } else if (title === FORM_TITLE_CHECK_OUT_OLD) {
+      // 旧名「退所日時」→「退所予定日時」へリネーム（一度だけ実行される）
+      item.setTitle(FORM_TITLE_CHECK_OUT);
     }
   });
 
+  // 入所/退所/連泊 のスキーマを保証する（必須緩和・連泊フラグ追加）
+  ensureOvernightSchema_(form);
+
   Logger.log('同期完了: スタッフ ' + staffNames.length + '名 / 児童 ' + childNames.length + '名');
+}
+
+/**
+ * 連泊対応のフォームスキーマを保証する
+ * - 入所日時・退所予定日時を「必須」から「任意」に変更
+ * - 連泊フラグ（チェックボックス）を末尾に追加（既存なら何もしない）
+ * @param {GoogleAppsScript.Forms.Form} form
+ */
+function ensureOvernightSchema_(form) {
+  var hasOvernight = false;
+
+  form.getItems().forEach(function(item) {
+    var title = item.getTitle();
+    var type = item.getType();
+    if (title === FORM_TITLE_OVERNIGHT) {
+      hasOvernight = true;
+      return;
+    }
+    if (title === FORM_TITLE_CHECK_IN || title === FORM_TITLE_CHECK_OUT) {
+      // 入所/退所予定の必須を解除
+      if (type === FormApp.ItemType.DATETIME) {
+        item.asDateTimeItem().setRequired(false);
+      } else if (type === FormApp.ItemType.DATE) {
+        item.asDateItem().setRequired(false);
+      } else if (type === FormApp.ItemType.TIME) {
+        item.asTimeItem().setRequired(false);
+      }
+    }
+  });
+
+  if (!hasOvernight) {
+    var item = form.addCheckboxItem();
+    item.setTitle(FORM_TITLE_OVERNIGHT)
+        .setHelpText(FORM_HELP_OVERNIGHT)
+        .setChoiceValues(['連泊'])
+        .setRequired(false);
+    Logger.log('連泊フラグをフォームに追加しました');
+  }
 }
 
 /**
@@ -98,16 +147,6 @@ function setListChoices_(item, choices) {
  * 一度だけ手動で実行してください
  */
 function setupFormSyncTrigger() {
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'syncFormDropdowns') {
-      ScriptApp.deleteTrigger(t);
-    }
-  });
-  ScriptApp.newTrigger('syncFormDropdowns')
-    .timeBased()
-    .everyDays(1)
-    .atHour(1)
-    .create();
-  Logger.log('トリガー設定完了（毎日AM1時）');
-  SpreadsheetApp.getUi().alert('トリガーを設定しました（毎日AM1時に自動同期）');
+  setupTimeTrigger_('syncFormDropdowns', { everyDays: 1, atHour: 1 });
+  Logger.log('フォーム同期トリガー設定完了（毎日AM1時）');
 }

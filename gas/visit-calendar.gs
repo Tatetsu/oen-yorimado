@@ -60,11 +60,6 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   var childNames = allChildren.map(function(r) { return r[MASTER_COL.NAME - 1]; })
     .filter(function(n) { return visitedChildSet[n]; });
 
-  var prevChildCount = 0;
-  if (sheet.getLastRow() >= CALENDAR_LAYOUT.HEADER_ROW && sheet.getLastColumn() > CALENDAR_LAYOUT.CHILD_START_COL) {
-    prevChildCount = sheet.getLastColumn() - CALENDAR_LAYOUT.CHILD_START_COL;
-  }
-
   clearCalendarArea_(sheet, childNames.length);
 
   if (childNames.length === 0) {
@@ -76,7 +71,6 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
 
   var holidayMap = getJapaneseHolidays_(year, month);
   var headerRow = buildHeaderRow_(childNames);
-  var dailyTotalCol = CALENDAR_LAYOUT.CHILD_START_COL + childNames.length;
 
   writeHeaderRow_(sheet, headerRow);
 
@@ -91,7 +85,7 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
 
   for (var day = 1; day <= daysInMonth; day++) {
     var dateObj = new Date(year, month - 1, day);
-    var dateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy/MM/dd');
+    var dateStr = formatDateYMD_(dateObj, 'yyyy/MM/dd', 'Asia/Tokyo');
     var dow = dateObj.getDay();
     var row = [month + '/' + day, DOW_LABELS[dow]];
     var typeRow = ['', ''];
@@ -113,10 +107,6 @@ function updateVisitCalendarByMonth_(sheet, year, month) {
   sheet.getRange(dataStartRow, 1, dataRows.length, headerRow.length).setValues(dataRows);
   applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, headerRow.length, typeRows);
 
-  if (childNames.length !== prevChildCount) {
-    applyColumnWidths_(sheet, childNames.length, dailyTotalCol);
-  }
-
   sheet.setFrozenRows(dataStartRow - 1);
   Logger.log('来館カレンダーを更新しました: ' + year + '年' + month + '月 (' + childNames.length + '名)');
 }
@@ -134,7 +124,7 @@ function buildVisitMapFromConfirmed_(year, month) {
   data.forEach(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     if (recordDate.getFullYear() !== year || (recordDate.getMonth() + 1) !== month) return;
-    var dateStr = Utilities.formatDate(recordDate, 'Asia/Tokyo', 'yyyy/MM/dd');
+    var dateStr = formatDateYMD_(recordDate, 'yyyy/MM/dd', 'Asia/Tokyo');
     var childName = row[CONFIRMED_COL.CHILD_NAME - 1];
     map[dateStr + '_' + childName] = row[CONFIRMED_COL.DATA_TYPE - 1];
   });
@@ -193,7 +183,7 @@ function getJapaneseHolidays_(year, month) {
     var endDate = new Date(year, month, 0);
     var events = cal.getEvents(startDate, endDate);
     events.forEach(function(event) {
-      var dateStr = Utilities.formatDate(event.getStartTime(), 'Asia/Tokyo', 'yyyy/MM/dd');
+      var dateStr = formatDateYMD_(event.getStartTime(), 'yyyy/MM/dd', 'Asia/Tokyo');
       map[dateStr] = event.getTitle();
     });
   } catch (e) {
@@ -223,12 +213,6 @@ function updateVisitCalendarByYear_(sheet, year) {
   var childNames = allChildren.map(function(r) { return r[MASTER_COL.NAME - 1]; })
     .filter(function(n) { return visitedChildSet[n]; });
 
-  // 前回の児童列数を保存（列幅維持の判定用）
-  var prevChildCount = 0;
-  if (sheet.getLastRow() >= CALENDAR_LAYOUT.HEADER_ROW && sheet.getLastColumn() > CALENDAR_LAYOUT.CHILD_START_COL) {
-    prevChildCount = sheet.getLastColumn() - CALENDAR_LAYOUT.CHILD_START_COL;
-  }
-
   clearCalendarArea_(sheet, childNames.length);
 
   if (childNames.length === 0) {
@@ -240,7 +224,6 @@ function updateVisitCalendarByYear_(sheet, year) {
 
   var holidayMap = getJapaneseHolidaysYear_(year);
   var headerRow = buildHeaderRow_(childNames);
-  var dailyTotalCol = CALENDAR_LAYOUT.CHILD_START_COL + childNames.length;
 
   // ヘッダー行
   writeHeaderRow_(sheet, headerRow);
@@ -260,7 +243,7 @@ function updateVisitCalendarByYear_(sheet, year) {
     var daysInMonth = new Date(year, m, 0).getDate();
     for (var day = 1; day <= daysInMonth; day++) {
       var dateObj = new Date(year, m - 1, day);
-      var dateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy/MM/dd');
+      var dateStr = formatDateYMD_(dateObj, 'yyyy/MM/dd', 'Asia/Tokyo');
       var dow = dateObj.getDay();
       var row = [m + '/' + day, DOW_LABELS[dow]];
       var typeRow = ['', ''];
@@ -282,11 +265,6 @@ function updateVisitCalendarByYear_(sheet, year) {
 
   sheet.getRange(dataStartRow, 1, dataRows.length, headerRow.length).setValues(dataRows);
   applyDataFormatting_(sheet, dataStartRow, dataRows, rowDowInfo, childNames, headerRow.length, typeRows);
-
-  // 児童数が変わった場合のみ列幅を再設定
-  if (childNames.length !== prevChildCount) {
-    applyColumnWidths_(sheet, childNames.length, dailyTotalCol);
-  }
 
   // ヘッダー＋集計行を固定
   sheet.setFrozenRows(dataStartRow - 1);
@@ -310,6 +288,9 @@ function buildHeaderRow_(childNames) {
 
 /**
  * カレンダーのデータエリアをクリアする
+ * 値に加えて背景色・文字色もリセットする。年→月のように描画範囲が縮む切替時、
+ * 前回の土日色や児童ハイライトが新データ範囲外に残留するのを防ぐ。
+ * 列幅などそれ以外の書式は保持する。
  */
 function clearCalendarArea_(sheet, childCount) {
   var lastRow = sheet.getLastRow();
@@ -318,7 +299,8 @@ function clearCalendarArea_(sheet, childCount) {
     var cols = Math.max(lastCol, childCount + 4);
     var range = sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1, lastRow - CALENDAR_LAYOUT.HEADER_ROW + 1, cols);
     range.clearContent();
-    range.clearFormat();
+    range.setBackground(null);
+    range.setFontColor(null);
   }
 }
 
@@ -328,10 +310,7 @@ function clearCalendarArea_(sheet, childCount) {
 function writeHeaderRow_(sheet, headerRow) {
   var range = sheet.getRange(CALENDAR_LAYOUT.HEADER_ROW, 1, 1, headerRow.length);
   range.setValues([headerRow]);
-  range.setBackground('#4285F4')
-    .setFontColor('#FFFFFF')
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center');
+  styleSheetHeader_(range, null, { horizontalAlignment: 'center' });
 }
 
 /**
@@ -478,7 +457,7 @@ function buildVisitMapFromConfirmedYear_(year) {
   data.forEach(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     if (recordDate.getFullYear() !== year) return;
-    var dateStr = Utilities.formatDate(recordDate, 'Asia/Tokyo', 'yyyy/MM/dd');
+    var dateStr = formatDateYMD_(recordDate, 'yyyy/MM/dd', 'Asia/Tokyo');
     var childName = row[CONFIRMED_COL.CHILD_NAME - 1];
     var dataType = row[CONFIRMED_COL.DATA_TYPE - 1];
     map[dateStr + '_' + childName] = dataType;
@@ -502,7 +481,7 @@ function getJapaneseHolidaysYear_(year) {
     var endDate = new Date(year, 11, 31, 23, 59, 59);
     var events = cal.getEvents(startDate, endDate);
     events.forEach(function(event) {
-      var dateStr = Utilities.formatDate(event.getStartTime(), 'Asia/Tokyo', 'yyyy/MM/dd');
+      var dateStr = formatDateYMD_(event.getStartTime(), 'yyyy/MM/dd', 'Asia/Tokyo');
       map[dateStr] = event.getTitle();
     });
   } catch (e) {
