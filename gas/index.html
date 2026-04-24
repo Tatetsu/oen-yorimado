@@ -173,7 +173,7 @@
       <button class="modal-close" onclick="closeEdit()">×</button>
     </div>
     <div class="modal-body">
-      <div class="info-box">修正後、溝口様_回答シートの確定来館記録を手動で再生成してください。</div>
+      <div class="info-box">修正後、スタッフ用_回答シートの確定来館記録を手動で再生成してください。</div>
       <div class="form-grid">
         <p class="section-label">基本情報</p>
         <div class="form-row">
@@ -316,7 +316,62 @@
       childSel.innerHTML += '<option value="' + esc(name) + '">' + esc(name) + '</option>';
     });
 
+    populateStaffSelects(data.staffNames || []);
+    populateFormChoices(data.formChoices || {});
+
     document.getElementById('month-select').value = new Date().getMonth() + 1;
+  }
+
+  // スタッフ1/2 を <select> に差し替える（staffNames が空ならテキスト入力のまま）
+  function populateStaffSelects(staffNames) {
+    if (!staffNames || !staffNames.length) return;
+    [
+      { id: 'f-staffName', allowEmpty: false },
+      { id: 'f-staffName2', allowEmpty: true },
+    ].forEach(function(spec) {
+      var el = document.getElementById(spec.id);
+      if (!el) return;
+      var sel = document.createElement('select');
+      sel.id = spec.id;
+      if (spec.allowEmpty) {
+        var blank = document.createElement('option');
+        blank.value = ''; blank.text = '';
+        sel.appendChild(blank);
+      }
+      staffNames.forEach(function(n) {
+        var opt = document.createElement('option');
+        opt.value = n; opt.text = n;
+        sel.appendChild(opt);
+      });
+      el.parentNode.replaceChild(sel, el);
+    });
+  }
+
+  // 食事・入浴・睡眠・便・服薬 の <select> 選択肢をフォーム由来で上書き（取得失敗時はハードコード維持）
+  function populateFormChoices(formChoices) {
+    if (!formChoices) return;
+    var map = {
+      mealDinner: 'f-meal-dinner',
+      mealBreakfast: 'f-meal-breakfast',
+      mealLunch: 'f-meal-lunch',
+      bath: 'f-bath',
+      sleep: 'f-sleep',
+      bowel: 'f-bowel',
+      medicineNight: 'f-medicine-night',
+      medicineMorning: 'f-medicine-morning',
+    };
+    Object.keys(map).forEach(function(key) {
+      var choices = formChoices[key];
+      if (!choices || !choices.length) return;
+      var el = document.getElementById(map[key]);
+      if (!el) return;
+      el.innerHTML = '';
+      choices.forEach(function(v) {
+        var opt = document.createElement('option');
+        opt.value = v; opt.text = v;
+        el.appendChild(opt);
+      });
+    });
   }
 
   function switchTab(tab) {
@@ -368,7 +423,7 @@
         + field('スタッフ1', r.staffName)
         + field('スタッフ2', r.staffName2)
         + field('入所', r.checkInDisplay ? r.checkInDisplay.replace(/^\d{4}\/\d{2}\/\d{2} /, '') : '-')
-        + field('退所', r.checkOutDisplay ? r.checkOutDisplay.replace(/^\d{4}\/\d{2}\/\d{2} /, '') : '-')
+        + field('退所予定', r.checkOutDisplay ? r.checkOutDisplay.replace(/^\d{4}\/\d{2}\/\d{2} /, '') : '-')
         + field('体温', r.temperature ? r.temperature + '℃' : '-')
         + field('夕食', r.mealDinner)
         + field('朝食', r.mealBreakfast)
@@ -401,8 +456,8 @@
 
     document.getElementById('f-recordDate').value = r.recordDateInput;
     setSelect('f-childName', r.childName);
-    document.getElementById('f-staffName').value = r.staffName;
-    document.getElementById('f-staffName2').value = r.staffName2;
+    setInputOrSelectValue('f-staffName', r.staffName);
+    setInputOrSelectValue('f-staffName2', r.staffName2);
     document.getElementById('f-checkIn').value = r.checkInInput;
     document.getElementById('f-checkOut').value = r.checkOutInput;
     document.getElementById('f-temperature').value = r.temperature;
@@ -532,6 +587,18 @@
       if (el.options[i].value === value) { el.selectedIndex = i; return; }
     }
     el.selectedIndex = 0;
+  }
+
+  // input でも select でも値をセット（select で未登録値なら option を追加して保持）
+  function setInputOrSelectValue(id, value) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var v = value == null ? '' : value;
+    if (el.tagName === 'SELECT') {
+      setSelectOrAdd(id, v);
+    } else {
+      el.value = v;
+    }
   }
 
   function setSelectOrAdd(id, value) {

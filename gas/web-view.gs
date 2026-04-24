@@ -41,12 +41,16 @@ function requireValidToken_(token) {
 }
 
 /**
- * 初期データ（年リスト・児童名リスト）を返す
+ * 初期データ（年リスト・児童名リスト・スタッフ名リスト・フォーム選択肢）を返す
+ * - children: FORM_RESPONSE シートから既出児童名を抽出
+ * - staffNames: スタッフマスタ（B列）から取得（空なら FORM_RESPONSE の既出値で補完）
+ * - formChoices: 連携フォームのプルダウン正規値（取得失敗時は空オブジェクト、フロントでハードコード値にフォールバック）
  */
 function getInitialDataWeb(token) {
   requireValidToken_(token);
   var years = {};
   var childNames = {};
+  var staffFromResponses = {};
   try {
     var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
     var data = sheet.getDataRange().getValues();
@@ -55,6 +59,10 @@ function getInitialDataWeb(token) {
       if (isValidDate_(d)) years[d.getFullYear()] = true;
       var name = String(row[FORM_COL.CHILD_NAME - 1] || '').trim();
       if (name) childNames[name] = true;
+      var s1 = String(row[FORM_COL.STAFF_NAME - 1] || '').trim();
+      if (s1) staffFromResponses[s1] = true;
+      var s2 = String(row[FORM_COL.STAFF_NAME_2 - 1] || '').trim();
+      if (s2) staffFromResponses[s2] = true;
     });
   } catch (e) {
     logError_('getInitialDataWeb', e);
@@ -63,10 +71,65 @@ function getInitialDataWeb(token) {
   var yearList = Object.keys(years).map(Number).sort(function(a, b) { return b - a; });
   if (!yearList.length) yearList = [new Date().getFullYear()];
 
+  var staffNames = [];
+  try {
+    staffNames = getStaffNamesFromMaster_(SpreadsheetApp.getActiveSpreadsheet());
+  } catch (e) {
+    logError_('getInitialDataWeb.staff', e);
+  }
+  if (!staffNames.length) {
+    staffNames = Object.keys(staffFromResponses).sort();
+  }
+
   return {
     years: yearList,
     children: Object.keys(childNames).sort(),
+    staffNames: staffNames,
+    formChoices: getFormChoicesFromLinkedForm_(),
   };
+}
+
+/**
+ * 連携Googleフォームから各プルダウン項目の選択肢を取得する。
+ * 取得失敗時や未リンク時は空オブジェクトを返す（フロント側がハードコード値にフォールバック）。
+ */
+function getFormChoicesFromLinkedForm_() {
+  var result = {};
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var formUrl = ss.getFormUrl();
+    if (!formUrl) return result;
+    var form = FormApp.openByUrl(formUrl);
+    // フォーム質問タイトル → フロント側キー（半角/全角カッコ両対応）
+    var titleMap = {
+      '夕食': 'mealDinner',
+      '朝食': 'mealBreakfast',
+      '昼食': 'mealLunch',
+      '入浴': 'bath',
+      '睡眠': 'sleep',
+      '便': 'bowel',
+      '服薬(夜)': 'medicineNight',
+      '服薬（夜）': 'medicineNight',
+      '服薬(朝)': 'medicineMorning',
+      '服薬（朝）': 'medicineMorning',
+    };
+    form.getItems().forEach(function(item) {
+      var title = item.getTitle();
+      var key = titleMap[title];
+      if (!key) return;
+      var type = item.getType();
+      var choices = [];
+      if (type === FormApp.ItemType.LIST) {
+        choices = item.asListItem().getChoices().map(function(c) { return c.getValue(); });
+      } else if (type === FormApp.ItemType.MULTIPLE_CHOICE) {
+        choices = item.asMultipleChoiceItem().getChoices().map(function(c) { return c.getValue(); });
+      }
+      if (choices.length) result[key] = choices;
+    });
+  } catch (e) {
+    logError_('getFormChoicesFromLinkedForm_', e);
+  }
+  return result;
 }
 
 /**

@@ -123,3 +123,70 @@ GAS プロジェクトのマニフェストファイル。タイムゾーン（`
 | `FACILITY_NAME` | メール本文に使用する施設名 |
 | `EMAIL_SENDER_NAME` | メール送信者名 |
 | `ERROR_NOTIFY_EMAILS` | エラー通知の追加送信先（カンマ区切り、任意） |
+
+---
+
+## デプロイ運用（clasp）
+
+`.clasp.json` に scriptId と `rootDir: ./gas` を設定済み。コード変更は `clasp push` でGASに反映するが、Webアプリ（`index.html` / `web-view.gs`）を公開URLで配信するには**デプロイ**が別途必要。
+
+### コード反映
+
+```bash
+clasp push             # ./gas 配下を全ファイル同期
+clasp push --watch     # 変更を監視して自動Push
+clasp open             # ブラウザでGASエディタを開く
+```
+
+> **運用ルール**（`CLAUDE.md`）: AI が GAS ファイルを編集した場合、必ずユーザー承認を得てから `clasp push` すること。勝手にPushしない。
+
+### Webアプリのデプロイ方針
+
+Webアプリを本番URLで配信するには2方式ある。用途で使い分ける。
+
+#### 方式A: テストデプロイURL（真のHEAD実行）
+
+GAS エディタ経由のみ。Push 済みコードが即反映される。
+
+1. `clasp open` で GAS エディタを開く
+2. 右上「デプロイ」→ **「デプロイをテスト」**
+3. 種別「ウェブアプリ」を選択 → URL をコピー
+4. 以降は `clasp push` するだけで URL の挙動が更新される（再デプロイ不要）
+
+**注意**: このURLは**スクリプト編集権限を持つユーザーのみアクセス可**。開発中の動作確認に限定。
+
+#### 方式B: 既存デプロイを同一IDで上書き（本番共有用・擬似HEAD）
+
+公開URLを維持したまま最新コードに差し替える。エンドユーザーへの URL 配布はこちら。
+
+```bash
+# 既存デプロイ ID を確認
+clasp deployments
+
+# 例: - AKfycby... @3 - 本番  ← このIDを控える
+#     - AKfycbz... @HEAD - テスト用  ← Read-only のため -i 対象外
+
+# 同一IDで上書きデプロイ（URLは変わらず、コードだけ新バージョンに置換）
+clasp deploy -i <deploymentId> -d "変更内容の説明"
+```
+
+> **`@HEAD` を `-i` 指定すると `Read-only deployments may not be modified.` エラー**になる。`@HEAD` はテストデプロイ専用のシステム予約枠で、`clasp push` のみで自動更新される。本番上書きには必ず `@1` / `@2` … などのユーザー作成デプロイIDを使うこと。
+
+初回のみ下記でデプロイを新規作成し、発行された ID を控えておく：
+
+```bash
+clasp deploy -d "初回デプロイ"
+```
+
+### 推奨運用フロー
+
+1. ローカルで編集 → `clasp push`
+2. 方式A（テストデプロイURL）で動作確認
+3. 問題なければ `clasp deploy -i <本番deploymentId> -d "<変更概要>"` で本番URLを更新
+4. 許可ユーザーシート（`B2` = 編集画面URL）に登録済みURLはそのまま、コードのみ差し替わる
+
+### 許可ユーザーシートとの関係
+
+- 編集画面URL（Webアプリ公開URL）は **許可ユーザーシート `B2` セル** に記載する前提（`utils.gs:ALLOWED_USERS_BASE_URL_CELL`）
+- ユーザーごとに発行される最終URL（D列）は B2 + 各行のトークン（C列）を ARRAYFORMULA で結合した形
+- 方式Bで URL を維持する限り B2 は書き換え不要。新規デプロイで URL が変わる場合のみ B2 を更新すること
