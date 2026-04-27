@@ -20,6 +20,7 @@ function sendDailyVisitReports() {
 
 /**
  * 手動実行用: HTMLダイアログで対象日付を選択してメール送信する
+ * フロー: Step1(日付選択) → Step2(件数プレビュー) → Step3(送信完了)
  */
 function sendVisitReportsManual() {
   var yesterday = new Date();
@@ -28,46 +29,145 @@ function sendVisitReportsManual() {
 
   var html = HtmlService.createHtmlOutput(
     '<style>' +
-    '  body { font-family: "Google Sans", sans-serif; padding: 16px; }' +
+    '  body { font-family: "Google Sans", sans-serif; padding: 16px; margin: 0; }' +
     '  h3 { margin: 0 0 16px; font-size: 16px; }' +
     '  input[type="date"] { font-size: 16px; padding: 8px 12px; border: 1px solid #dadce0; border-radius: 4px; width: 100%; box-sizing: border-box; }' +
     '  .buttons { margin-top: 20px; text-align: right; }' +
     '  button { font-size: 14px; padding: 8px 24px; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px; }' +
+    '  button:disabled { opacity: 0.6; cursor: default; }' +
     '  .cancel { background: #f1f3f4; color: #5f6368; }' +
     '  .submit { background: #1a73e8; color: #fff; }' +
-    '  .submit:hover { background: #1765cc; }' +
+    '  .submit:hover:not(:disabled) { background: #1765cc; }' +
+    '  .summary { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px 16px; font-size: 14px; line-height: 1.8; }' +
+    '  .summary .row { display: flex; justify-content: space-between; }' +
+    '  .summary .label { color: #5f6368; }' +
+    '  .summary .value { font-weight: 500; }' +
+    '  .summary .value.sendable { color: #1a73e8; }' +
+    '  .target-date { font-size: 13px; color: #5f6368; margin-bottom: 8px; }' +
+    '  .result-main { font-size: 18px; font-weight: 500; text-align: center; margin: 16px 0 12px; }' +
+    '  .result-sub { font-size: 13px; color: #5f6368; text-align: center; }' +
+    '  .hidden { display: none; }' +
     '</style>' +
-    '<h3>対象日付を選択してください</h3>' +
-    '<input type="date" id="targetDate" value="' + defaultDate + '">' +
-    '<div class="buttons">' +
-    '  <button class="cancel" onclick="google.script.host.close()">キャンセル</button>' +
-    '  <button class="submit" onclick="submitDate()">送信</button>' +
+
+    '<div id="step1">' +
+    '  <h3>対象日付を選択してください</h3>' +
+    '  <input type="date" id="targetDate" value="' + defaultDate + '">' +
+    '  <div class="buttons">' +
+    '    <button class="cancel" onclick="google.script.host.close()">キャンセル</button>' +
+    '    <button class="submit" id="confirmBtn" onclick="goConfirm()">確認</button>' +
+    '  </div>' +
     '</div>' +
+
+    '<div id="step2" class="hidden">' +
+    '  <h3>送信内容の確認</h3>' +
+    '  <div class="target-date" id="step2Date"></div>' +
+    '  <div class="summary">' +
+    '    <div class="row"><span class="label">送信予定</span><span class="value sendable" id="cntSendable">-</span></div>' +
+    '  </div>' +
+    '  <div class="buttons">' +
+    '    <button class="cancel" onclick="goBack()">戻る</button>' +
+    '    <button class="submit" id="sendBtn" onclick="goSend()">送信</button>' +
+    '  </div>' +
+    '</div>' +
+
+    '<div id="step3" class="hidden">' +
+    '  <h3>送信完了</h3>' +
+    '  <div class="target-date" id="step3Date"></div>' +
+    '  <div class="result-main" id="resultMain"></div>' +
+    '  <div class="result-sub" id="resultSub"></div>' +
+    '  <div class="buttons">' +
+    '    <button class="submit" onclick="google.script.host.close()">閉じる</button>' +
+    '  </div>' +
+    '</div>' +
+
     '<script>' +
-    '  function submitDate() {' +
+    '  var currentDate = "";' +
+    '  function show(stepId) {' +
+    '    ["step1","step2","step3"].forEach(function(id){' +
+    '      document.getElementById(id).classList.toggle("hidden", id !== stepId);' +
+    '    });' +
+    '  }' +
+    '  function goBack() { show("step1"); }' +
+    '  function goConfirm() {' +
     '    var date = document.getElementById("targetDate").value;' +
     '    if (!date) { alert("日付を選択してください"); return; }' +
-    '    document.querySelector(".submit").disabled = true;' +
-    '    document.querySelector(".submit").textContent = "送信中...";' +
+    '    currentDate = date;' +
+    '    var btn = document.getElementById("confirmBtn");' +
+    '    btn.disabled = true; btn.textContent = "確認中...";' +
     '    google.script.run' +
-    '      .withSuccessHandler(function(result) {' +
-    '        google.script.host.close();' +
-    '        if (result) { google.script.run.showResultAlert(result); }' +
+    '      .withSuccessHandler(function(r) {' +
+    '        btn.disabled = false; btn.textContent = "確認";' +
+    '        document.getElementById("step2Date").textContent = "対象日: " + r.date;' +
+    '        document.getElementById("cntSendable").textContent = r.sendable + "件";' +
+    '        var sendBtn = document.getElementById("sendBtn");' +
+    '        sendBtn.disabled = (r.sendable === 0);' +
+    '        sendBtn.textContent = (r.sendable === 0) ? "送信対象なし" : "送信";' +
+    '        show("step2");' +
     '      })' +
-    '      .withFailureHandler(function(e) { alert("エラー: " + e.message); document.querySelector(".submit").disabled = false; document.querySelector(".submit").textContent = "送信"; })' +
-    '      .sendVisitReportsByDateFromDialog(date);' +
+    '      .withFailureHandler(function(e) {' +
+    '        btn.disabled = false; btn.textContent = "確認";' +
+    '        alert("エラー: " + e.message);' +
+    '      })' +
+    '      .countVisitReportsByDate(date);' +
+    '  }' +
+    '  function goSend() {' +
+    '    var btn = document.getElementById("sendBtn");' +
+    '    btn.disabled = true; btn.textContent = "送信中...";' +
+    '    google.script.run' +
+    '      .withSuccessHandler(function(r) {' +
+    '        document.getElementById("step3Date").textContent = "対象日: " + r.date;' +
+    '        document.getElementById("resultMain").textContent = r.sent + "/" + r.sendable + "件 送信完了";' +
+    '        var subParts = [];' +
+    '        if (r.skipped > 0) subParts.push("スキップ: " + r.skipped + "件");' +
+    '        if (r.errors > 0) subParts.push("エラー: " + r.errors + "件");' +
+    '        document.getElementById("resultSub").textContent = subParts.join(" / ");' +
+    '        show("step3");' +
+    '      })' +
+    '      .withFailureHandler(function(e) {' +
+    '        btn.disabled = false; btn.textContent = "送信";' +
+    '        alert("エラー: " + e.message);' +
+    '      })' +
+    '      .sendVisitReportsByDateFromDialog(currentDate);' +
     '  }' +
     '</script>'
   )
-  .setWidth(320)
-  .setHeight(180);
+  .setWidth(360)
+  .setHeight(240);
 
   SpreadsheetApp.getUi().showModalDialog(html, '来館報告メール送信');
 }
 
 /**
+ * HTMLダイアログから呼ばれる: 指定日の送信予定件数を集計する（送信は行わない）
+ * 条件: 記録日 = 対象日 / タイムスタンプあり / メール送信済が空
+ * @param {string} dateStr yyyy-MM-dd形式の日付文字列
+ * @returns {{date: string, sendable: number}}
+ */
+function countVisitReportsByDate(dateStr) {
+  var targetDate = parseDateInput_(dateStr);
+  if (!targetDate) {
+    throw new Error('日付の形式が不正です: ' + dateStr);
+  }
+  var tz = Session.getScriptTimeZone();
+  var targetDateStr = formatDateYMD_(targetDate, 'yyyy/MM/dd', tz);
+
+  var records = getFormResponsesByDate_(targetDate);
+  var sendable = 0;
+  for (var i = 0; i < records.length; i++) {
+    var row = records[i].data;
+    var timestamp = row[FORM_COL.TIMESTAMP - 1];
+    var sentFlag = row[FORM_COL.EMAIL_SENT - 1];
+    if (!timestamp) continue;
+    if (sentFlag && String(sentFlag).trim() !== '') continue;
+    sendable++;
+  }
+  return { date: targetDateStr, sendable: sendable };
+}
+
+/**
  * HTMLダイアログから呼ばれるメール送信処理
  * @param {string} dateStr yyyy-MM-dd形式の日付文字列
+ * @returns {{date: string, sent: number, sendable: number, skipped: number, errors: number}}
  */
 function sendVisitReportsByDateFromDialog(dateStr) {
   var targetDate = parseDateInput_(dateStr);
@@ -78,28 +178,20 @@ function sendVisitReportsByDateFromDialog(dateStr) {
 }
 
 /**
- * 処理結果をアラートダイアログで表示する（HTMLダイアログから呼び出し用）
- * @param {string} message 表示するメッセージ
- */
-function showResultAlert(message) {
-  SpreadsheetApp.getUi().alert('来館報告メール送信結果', message, SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-/**
  * 指定日の来館記録を保護者にメール送信する
  * @param {Date} targetDate 対象日付
- * @returns {string} 処理結果メッセージ
+ * @returns {{date: string, sent: number, sendable: number, skipped: number, errors: number}} 処理結果
  */
 function sendVisitReportsByDate_(targetDate) {
   var tz = Session.getScriptTimeZone();
-  var targetDateStr = formatDateYMD_(targetDate, 'yyyy-MM-dd', tz);
+  var targetDateStr = formatDateYMD_(targetDate, 'yyyy/MM/dd', tz);
   Logger.log('来館報告メール送信開始: 対象日 = ' + targetDateStr);
 
   // フォームの回答から対象日のレコードを抽出
   var records = getFormResponsesByDate_(targetDate);
   if (records.length === 0) {
     Logger.log('対象日の来館記録がありません: ' + targetDateStr);
-    return '対象日（' + targetDateStr + '）の来館記録がありません。';
+    return { date: targetDateStr, sent: 0, sendable: 0, skipped: 0, errors: 0 };
   }
 
   // スタッフ用_回答シートへの参照（送信済フラグ書き込み用）
@@ -136,6 +228,7 @@ function sendVisitReportsByDate_(targetDate) {
   var sentCount = 0;
   var skipCount = 0;
   var errorCount = 0;
+  var sendableCount = 0;
 
   for (var i = 0; i < records.length; i++) {
     var record = records[i].data;
@@ -165,6 +258,7 @@ function sendVisitReportsByDate_(targetDate) {
       continue;
     }
 
+    sendableCount++;
     try {
       var ts2 = record[FORM_COL.TIMESTAMP - 1];
       var stayKey = (ts2 instanceof Date ? ts2.getTime() : String(ts2)) + '|' + childName;
@@ -189,12 +283,14 @@ function sendVisitReportsByDate_(targetDate) {
     }
   }
 
-  var resultMessage = '来館報告メール送信完了（' + targetDateStr + '）\n\n'
-    + '送信: ' + sentCount + '件\n'
-    + 'スキップ: ' + skipCount + '件\n'
-    + 'エラー: ' + errorCount + '件';
   Logger.log('来館報告メール送信完了: 送信=' + sentCount + '件, スキップ=' + skipCount + '件, エラー=' + errorCount + '件');
-  return resultMessage;
+  return {
+    date: targetDateStr,
+    sent: sentCount,
+    sendable: sendableCount,
+    skipped: skipCount,
+    errors: errorCount,
+  };
 }
 
 /**
