@@ -198,12 +198,12 @@
         <p class="section-label">時間</p>
         <div class="form-row">
           <div class="form-group">
-            <label>入所日時</label>
-            <input type="datetime-local" id="f-checkIn">
+            <label>入所日時 <span style="color:#d33">*</span></label>
+            <input type="datetime-local" id="f-checkIn" required>
           </div>
           <div class="form-group">
-            <label>退所予定日時</label>
-            <input type="datetime-local" id="f-checkOut">
+            <label>退所予定日時 <span style="color:#d33">*</span></label>
+            <input type="datetime-local" id="f-checkOut" required>
           </div>
         </div>
 
@@ -256,14 +256,6 @@
         <p class="section-label">連絡事項</p>
         <div class="form-group">
           <textarea id="f-notes" placeholder="特になし"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label>連泊（初日は退所予定空欄／中日は両方空欄／最終日は入所空欄）</label>
-          <select id="f-overnight">
-            <option value=""></option>
-            <option value="連泊">連泊</option>
-          </select>
         </div>
       </div>
     </div>
@@ -470,7 +462,6 @@
     setSelectOrAdd('f-medicine-night', r.medicineNight);
     setSelectOrAdd('f-medicine-morning', r.medicineMorning);
     document.getElementById('f-notes').value = r.notes;
-    document.getElementById('f-overnight').value = r.isOvernight ? '連泊' : '';
 
     var btn = document.getElementById('save-btn');
     btn.disabled = false;
@@ -483,6 +474,12 @@
 
   function saveRecord() {
     var btn = document.getElementById('save-btn');
+    var checkInVal = document.getElementById('f-checkIn').value;
+    var checkOutVal = document.getElementById('f-checkOut').value;
+    if (!checkInVal || !checkOutVal) {
+      showToast('入所日時と退所予定日時はどちらも必須です。', 'error');
+      return;
+    }
     btn.disabled = true;
     btn.textContent = '保存中...';
 
@@ -491,8 +488,8 @@
       childName: document.getElementById('f-childName').value,
       staffName: document.getElementById('f-staffName').value,
       staffName2: document.getElementById('f-staffName2').value,
-      checkInInput: document.getElementById('f-checkIn').value,
-      checkOutInput: document.getElementById('f-checkOut').value,
+      checkInInput: checkInVal,
+      checkOutInput: checkOutVal,
       temperature: document.getElementById('f-temperature').value,
       mealDinner: document.getElementById('f-meal-dinner').value,
       mealBreakfast: document.getElementById('f-meal-breakfast').value,
@@ -503,7 +500,6 @@
       medicineNight: document.getElementById('f-medicine-night').value,
       medicineMorning: document.getElementById('f-medicine-morning').value,
       notes: document.getElementById('f-notes').value,
-      overnight: document.getElementById('f-overnight').value,
     };
 
     var rowIndex = s.records[s.editIdx].rowIndex;
@@ -533,7 +529,6 @@
           r.medicineNight = data.medicineNight;
           r.medicineMorning = data.medicineMorning;
           r.notes = data.notes;
-          r.isOvernight = data.overnight === '連泊';
           renderCards(s.tab + '-body', s.tab + '-badge', s.records);
         } else {
           showToast('保存に失敗しました: ' + (res.error || ''), 'error');

@@ -133,7 +133,8 @@ function setupConfirmedVisitsSheet_(ss) {
 
   // ヘッダー行（3行目）- CONFIRMED_COL と完全一致させる
   // 列順はフォームの回答(2列目以降)と一致させてある（1列目=データ区分はタイムスタンプの位置）
-  var headers = ['データ区分', '記録日', 'スタッフ1', 'スタッフ2', '児童名', '入所日時', '退所予定日時', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項', '連泊'];
+  // 19列目「宿泊PK」は児童名+入所日時のユニークキーで、デフォルト非表示
+  var headers = ['データ区分', '記録日', 'スタッフ1', 'スタッフ2', '児童名', '入所日時', '退所予定日時', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項', '連泊', '宿泊PK'];
   var headerRange = sheet.getRange(CONFIRMED_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers]);
   if (pristine) {
@@ -157,8 +158,12 @@ function setupConfirmedVisitsSheet_(ss) {
       16: 60,  // 服薬(朝)
       17: 200, // その他連絡事項
       18: 60,  // 連泊
+      19: 200, // 宿泊PK
     });
   }
+
+  // 宿泊PK列はデフォルト非表示（運用上は不要、デバッグ・整合性確認用）
+  sheet.hideColumns(CONFIRMED_COL.STAY_PK);
 
   Logger.log('確定来館記録シートのセットアップ完了');
 }

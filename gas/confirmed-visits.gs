@@ -18,7 +18,7 @@ function updateConfirmedVisits(year, month) {
   }
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
   var filterByMonth = (month !== undefined && month !== null);
-  var colCount = CONFIRMED_COL.OVERNIGHT_FLAG; // 列数=末尾(OVERNIGHT_FLAG=18)
+  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=19)
 
   // 既存データを全件取得
   var lastRow = sheet.getLastRow();
@@ -43,7 +43,7 @@ function updateConfirmedVisits(year, month) {
 
   // 全期間の回答からペアリング → 月指定で絞り込み
   var allResponses = getFormResponsesAll_();
-  var allStays = pairOvernightRecords_(allResponses);
+  var allStays = pairStayRecords_(allResponses);
 
   var newRows = [];
   allStays.forEach(function(stay) {
@@ -97,6 +97,7 @@ function updateConfirmedVisits(year, month) {
         primary[FORM_COL.MEDICINE_MORNING - 1],   // 服薬(朝)
         primary[FORM_COL.NOTES - 1],              // その他連絡事項
         stay.isOvernight ? true : false,          // 連泊フラグ
+        buildStayPk_(stay.childName, checkInFull),// 宿泊PK
       ]);
     });
   });

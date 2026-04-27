@@ -214,60 +214,70 @@ function saveLastBounceCheckDate_(date) {
 }
 
 /**
- * 連泊レコードのバリデーションを実行し、孤立・誤入力を検知する
- * 月次一括処理の冒頭で呼び出すことを想定
+ * 宿泊レコードのバリデーションを実行する（ユニーク宿泊キー方式）
+ *
+ * 新仕様での検知ルール:
+ *   1. 入退所いずれかが空欄
+ *   2. 入所日時 > 退所日時（時系列が逆転している）
+ *   3. 同一児童で重複期間の宿泊がある（既存の宿泊期間に新しい宿泊期間が重なる）
+ *
  * @param {number} [year] 対象年（省略時は全期間）
  * @param {number} [month] 対象月 1-12（省略時は全期間）
  * @returns {Array<{childName: string, recordDate: Date, issues: Array<string>}>}
  */
 function validateOvernightRecords(year, month) {
   var allResponses = getFormResponsesAll_();
-  var stays = pairOvernightRecords_(allResponses);
+  var stays = pairStayRecords_(allResponses);
 
   var filterByMonth = (year !== undefined && month !== undefined);
   var monthStart = filterByMonth ? new Date(year, month - 1, 1) : null;
   var monthEnd = filterByMonth ? new Date(year, month, 0) : null;
 
-  // 連泊長期化（開始から OVERNIGHT_MAX_DAYS 日経過しても未終了）の閾値
-  var OVERNIGHT_MAX_DAYS = 14;
-
-  var issues = [];
-  var today = new Date();
-  today.setHours(0, 0, 0, 0);
-
+  // 1. 各 stay 単体のチェック（空欄・時系列逆転）
   stays.forEach(function(stay) {
-    // 連泊長期化チェック
-    if (stay.isOvernight && stay.checkIn instanceof Date && !stay.checkOut) {
-      var diffDays = Math.floor((today - stay.checkIn) / 86400000);
-      if (diffDays >= OVERNIGHT_MAX_DAYS) {
-        stay.issues = stay.issues || [];
-        stay.issues.push('連泊開始から' + diffDays + '日経過しても終了レコードなし');
-      }
+    stay.issues = stay.issues || [];
+    if (!stay.checkIn || !stay.checkOut) {
+      stay.issues.push('入所日時または退所日時が空欄');
+    } else if (stay.checkIn.getTime() > stay.checkOut.getTime()) {
+      stay.issues.push('入所日時が退所日時より後になっている');
     }
+  });
 
-    // 単泊なのに入退所どちらかが空欄
-    if (!stay.isOvernight) {
-      if (!stay.checkIn || !stay.checkOut) {
-        stay.issues = stay.issues || [];
-        stay.issues.push('単泊（連泊OFF）なのに入所/退所のどちらかが空欄');
+  // 2. 児童ごとに宿泊期間の重複をチェック
+  var byChild = {};
+  stays.forEach(function(stay) {
+    if (!stay.childName || !stay.checkIn || !stay.checkOut) return;
+    if (!byChild[stay.childName]) byChild[stay.childName] = [];
+    byChild[stay.childName].push(stay);
+  });
+  Object.keys(byChild).forEach(function(name) {
+    var list = byChild[name].slice().sort(function(a, b) {
+      return a.checkIn.getTime() - b.checkIn.getTime();
+    });
+    for (var i = 0; i < list.length - 1; i++) {
+      var cur = list[i];
+      var nxt = list[i + 1];
+      if (cur.checkOut.getTime() > nxt.checkIn.getTime()) {
+        cur.issues.push('別の宿泊（' + formatDateYMD_(nxt.checkIn) + '〜）と期間が重複');
       }
     }
+  });
 
-    if (stay.issues && stay.issues.length > 0) {
-      // 月フィルタ: 該当月と無関係なら除外
-      if (filterByMonth) {
-        var staySpan = stay.checkIn || stay.checkOut || stay.recordDate;
-        if (!(staySpan instanceof Date)) return;
-        var spanStart = stay.checkIn || stay.recordDate;
-        var spanEnd = stay.checkOut || stay.recordDate;
-        if (spanEnd < monthStart || spanStart > monthEnd) return;
-      }
-      issues.push({
-        childName: stay.childName,
-        recordDate: stay.recordDate,
-        issues: stay.issues.slice(),
-      });
+  // 3. 月フィルタ + 結果整形
+  var issues = [];
+  stays.forEach(function(stay) {
+    if (!stay.issues || stay.issues.length === 0) return;
+    if (filterByMonth) {
+      var spanStart = stay.checkIn || stay.recordDate;
+      var spanEnd = stay.checkOut || stay.recordDate;
+      if (!(spanStart instanceof Date) || !(spanEnd instanceof Date)) return;
+      if (spanEnd < monthStart || spanStart > monthEnd) return;
     }
+    issues.push({
+      childName: stay.childName,
+      recordDate: stay.recordDate,
+      issues: stay.issues.slice(),
+    });
   });
 
   return issues;

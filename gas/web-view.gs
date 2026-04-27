@@ -219,6 +219,15 @@ function updateFormResponseWeb(token, rowIndex, data) {
     var checkIn = data.checkInInput ? new Date(data.checkInInput) : '';
     var checkOut = data.checkOutInput ? new Date(data.checkOutInput) : '';
 
+    // 新仕様: 入退所日が異なれば連泊扱いとして OVERNIGHT_FLAG に '連泊' を書き込む（後方互換用フラグ）
+    var overnightFlag = '';
+    if (checkIn instanceof Date && checkOut instanceof Date
+        && (checkIn.getFullYear() !== checkOut.getFullYear()
+            || checkIn.getMonth() !== checkOut.getMonth()
+            || checkIn.getDate() !== checkOut.getDate())) {
+      overnightFlag = '連泊';
+    }
+
     var values = [[
       recordDate,
       data.staffName,
@@ -236,10 +245,10 @@ function updateFormResponseWeb(token, rowIndex, data) {
       data.medicineNight || '',
       data.medicineMorning || '',
       data.notes || '',
-      data.overnight === '連泊' ? '連泊' : '',
+      overnightFlag,
     ]];
 
-    // RECORD_DATE(col 2) から OVERNIGHT_FLAG(col 18) までの 17 列を書き込む（連泊フラグは連絡事項の直後）
+    // RECORD_DATE(col 2) から OVERNIGHT_FLAG(col 18) までの 17 列を書き込む
     var writeWidth = FORM_COL.OVERNIGHT_FLAG - FORM_COL.RECORD_DATE + 1;
     sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, writeWidth).setValues(values);
     sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, 1).setNumberFormat('yyyy/mm/dd');

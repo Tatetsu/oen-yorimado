@@ -99,7 +99,7 @@ function collectFormResponsesByScope_(scope) {
 function countVisitsByScope_(formResponses, scope) {
   var counts = {};
   var seenByChild = {}; // {児童名: {日付キー: true}} 同日重複防止
-  var stays = pairOvernightRecords_(formResponses);
+  var stays = pairStayRecords_(formResponses);
   stays.forEach(function(stay) {
     var childName = stay.childName;
     if (!childName) return;

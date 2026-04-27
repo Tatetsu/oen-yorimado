@@ -117,7 +117,7 @@ function sendVisitReportsByDate_(targetDate) {
 
   // 連泊ペアリングを事前計算: 各レコードに紐付く論理1宿泊の入退所を引けるようにする
   var allResponses = getFormResponsesAll_();
-  var stays = pairOvernightRecords_(allResponses);
+  var stays = pairStayRecords_(allResponses);
   var stayByTimestamp = {};
   stays.forEach(function(stay) {
     stay.sourceRows.forEach(function(srcRow) {

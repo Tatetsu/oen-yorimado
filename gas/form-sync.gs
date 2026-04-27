@@ -45,8 +45,9 @@ function syncFormDropdowns() {
     }
   });
 
-  // 入所/退所/連泊 のスキーマを保証する（必須緩和・連泊フラグ追加）
-  ensureOvernightSchema_(form);
+  // 新仕様（ユニーク宿泊キー方式）では連泊フラグは不要のため、スキーマ保証呼び出しは無効化。
+  // 関数本体は残してロールバック可能にしている（必要なら下記のコメントを外す）。
+  // ensureOvernightSchema_(form);
 
   Logger.log('同期完了: スタッフ ' + staffNames.length + '名 / 児童 ' + childNames.length + '名');
 }

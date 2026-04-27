@@ -158,7 +158,8 @@ const DAY_OF_WEEK_MAP = {
 // 確定来館記録の列インデックス（1始まり）
 // FORM_COL と同じ粒度で食事・服薬を分離する
 // 1列目=DATA_TYPE はフォームの TIMESTAMP と同位置。2列目以降は FORM_COL と一致する
-// OVERNIGHT_FLAG: 連泊フラグ（ペアリング後、連泊1宿泊から展開された行は true）
+// OVERNIGHT_FLAG: 連泊フラグ（入所日と退所日が異なる行で true）
+// STAY_PK: 宿泊単位のユニークキー（児童名|入所日時ISO）。最終列・既定で非表示。
 const CONFIRMED_COL = {
   DATA_TYPE: 1,
   RECORD_DATE: 2,
@@ -178,6 +179,7 @@ const CONFIRMED_COL = {
   MEDICINE_MORNING: 16,    // 服薬(朝)
   NOTES: 17,
   OVERNIGHT_FLAG: 18,      // 連泊フラグ（true/false）
+  STAY_PK: 19,             // 宿泊PK（児童名|入所日時ISO）
 };
 
 // メール件名のデフォルト値（設定シート未設定時のフォールバック）
@@ -380,16 +382,47 @@ function getActiveChildren() {
 
 /**
  * フォームの回答から指定年のデータを取得する
+ * 入所日時〜退所日時の滞在期間が対象年と重なるレコードも返す（年またぎ連泊対応）
+ * 児童名+入所日時でペアリングした論理1宿泊が対象年と重なる場合に構成全レコードを返す。
  * @param {number} year 年
  * @returns {Array<Array>} 該当年のフォーム回答データ
  */
 function getFormResponsesByYear(year) {
-  const sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
-  const data = sheet.getDataRange().getValues();
-  return data.slice(1).filter(function(row) {
-    var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
-    return recordDate.getFullYear() === year;
+  var allResponses = getFormResponsesAll_();
+  var stays = pairStayRecords_(allResponses);
+  var yearStart = new Date(year, 0, 1);
+  var yearEnd = new Date(year, 11, 31);
+
+  var includeRows = [];
+  var seen = {};
+
+  stays.forEach(function(stay) {
+    var stayStart = stay.checkIn ? new Date(stay.checkIn.getFullYear(), stay.checkIn.getMonth(), stay.checkIn.getDate()) : null;
+    var stayEnd = stay.checkOut ? new Date(stay.checkOut.getFullYear(), stay.checkOut.getMonth(), stay.checkOut.getDate()) : null;
+
+    var overlaps = false;
+    if (stayStart && stayEnd) {
+      overlaps = stayStart <= yearEnd && stayEnd >= yearStart;
+    } else if (stayStart) {
+      overlaps = stayStart.getFullYear() === year;
+    } else if (stayEnd) {
+      overlaps = stayEnd.getFullYear() === year;
+    } else {
+      overlaps = stay.recordDate.getFullYear() === year;
+    }
+
+    if (overlaps) {
+      stay.sourceRows.forEach(function(row) {
+        var key = row[FORM_COL.TIMESTAMP - 1] + '|' + row[FORM_COL.CHILD_NAME - 1];
+        if (!seen[key]) {
+          seen[key] = true;
+          includeRows.push(row);
+        }
+      });
+    }
   });
+
+  return includeRows;
 }
 
 /**
@@ -403,7 +436,7 @@ function getFormResponsesByYear(year) {
  */
 function getFormResponsesByMonth(year, month) {
   var allResponses = getFormResponsesAll_();
-  var stays = pairOvernightRecords_(allResponses);
+  var stays = pairStayRecords_(allResponses);
   var monthStart = new Date(year, month - 1, 1);
   var monthEnd = new Date(year, month, 0);
 
@@ -782,15 +815,13 @@ function expandStayToDates_(recordDate, checkIn, checkOut) {
 }
 
 /**
- * フォーム回答を「論理1宿泊」単位にペアリングする（連泊対応）
+ * フォーム回答を「児童名+入所日時」のユニークキーで論理1宿泊にペアリングする
  *
- * 連泊フラグONのレコードは入所/退所欄の充填パターンに基づきペアリングする:
- *   - 入所あり・退所空欄 → 連泊開始（次の「入所空欄・退所あり」と対をなす）
- *   - 入所空欄・退所空欄 → 連泊中日（開始済み連泊に紐付く）
- *   - 入所空欄・退所あり → 連泊終了（直近の開始とペアになり1宿泊として確定）
- *   - 入所あり・退所あり → 単泊扱い（誤入力の可能性、bounce-checker で警告）
- *
- * 連泊フラグOFFのレコードは単泊として独立した1宿泊。
+ * 新仕様（ユニーク宿泊キー方式）:
+ *   - 全レコードに入所日時・退所日時を記入する運用
+ *   - 児童名+入所日時が同じレコードは同一宿泊（中日の様子記録は同じ入退所を共有）
+ *   - 状態機械によるペアリングは不要
+ *   - プライマリ行 = 記録日と入所日が一致する行（無ければグループ内で記録日が最も早い行）
  *
  * @param {Array<Array>} formResponses フォーム回答データ（ヘッダー除く）
  * @returns {Array<{
@@ -801,168 +832,153 @@ function expandStayToDates_(recordDate, checkIn, checkOut) {
  *   isOvernight: boolean,
  *   sourceRows: Array<Array>,
  *   primaryRow: Array,
- *   issues: Array<string>
+ *   issues: Array<string>,
+ *   stayPk: string
  * }>} 論理1宿泊のリスト
  */
-function pairOvernightRecords_(formResponses) {
-  // 児童ごとにグループ化
-  var byChild = {};
-  formResponses.forEach(function(row, idx) {
+function pairStayRecords_(formResponses) {
+  var groups = {};
+
+  formResponses.forEach(function(row) {
     var name = row[FORM_COL.CHILD_NAME - 1];
     if (!name) return;
-    if (!byChild[name]) byChild[name] = [];
-    byChild[name].push({ row: row, idx: idx });
-  });
 
-  var stays = [];
-  Object.keys(byChild).forEach(function(name) {
-    var records = byChild[name];
-    // 記録日昇順でソート（同日内はインデックス順=入力順）
-    records.sort(function(a, b) {
-      var da = new Date(a.row[FORM_COL.RECORD_DATE - 1]);
-      var db = new Date(b.row[FORM_COL.RECORD_DATE - 1]);
-      var t = da.getTime() - db.getTime();
-      return t !== 0 ? t : (a.idx - b.idx);
-    });
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+    var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
+    var hasCheckIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
+    var hasCheckOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
 
-    var openStay = null; // 連泊オープン中の宿泊
-    records.forEach(function(rec) {
-      var row = rec.row;
-      var isOvernightFlag = isOvernightRow_(row);
-      var checkIn = row[FORM_COL.CHECK_IN - 1];
-      var checkOut = row[FORM_COL.CHECK_OUT - 1];
-      var hasCheckIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
-      var hasCheckOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
-      var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
+    // 入所日時が無いレコードは記録日+タイムスタンプで独立した1宿泊として扱う（移行データ吸収用）
+    var key;
+    if (hasCheckIn) {
+      key = buildStayPk_(name, checkIn);
+    } else {
+      var ts = row[FORM_COL.TIMESTAMP - 1];
+      key = name + '|NOIN|' +
+        (recordDate instanceof Date ? recordDate.getTime() : String(recordDate)) + '|' +
+        (ts instanceof Date ? ts.getTime() : String(ts || ''));
+    }
 
-      if (!isOvernightFlag) {
-        // 単泊
-        if (openStay) {
-          // オープン中の連泊が閉じる前に単泊が来た → 連泊終了レコード未送信
-          openStay.issues.push('連泊終了レコード未送信（次の単泊で打ち切り）');
-          stays.push(openStay);
-          openStay = null;
-        }
-        stays.push({
-          childName: name,
-          checkIn: hasCheckIn ? checkIn : null,
-          checkOut: hasCheckOut ? checkOut : null,
-          recordDate: recordDate,
-          isOvernight: false,
-          sourceRows: [row],
-          primaryRow: row,
-          issues: [],
-        });
-        return;
-      }
-
-      // 連泊フラグON
-      if (hasCheckIn && hasCheckOut) {
-        // 誤入力: 連泊なのに両方記入 → 単泊扱い + 警告
-        var stay = {
-          childName: name,
-          checkIn: checkIn,
-          checkOut: checkOut,
-          recordDate: recordDate,
-          isOvernight: true,
-          sourceRows: [row],
-          primaryRow: row,
-          issues: ['連泊ONだが入所/退所両方記入（単泊なら連泊OFFに、連泊なら片方を空欄に）'],
-        };
-        if (openStay) {
-          openStay.issues.push('連泊終了レコード未送信（誤入力レコードで打ち切り）');
-          stays.push(openStay);
-          openStay = null;
-        }
-        stays.push(stay);
-        return;
-      }
-
-      if (hasCheckIn && !hasCheckOut) {
-        // 連泊開始
-        if (openStay) {
-          openStay.issues.push('連泊終了レコード未送信（次の連泊開始で打ち切り）');
-          stays.push(openStay);
-        }
-        openStay = {
-          childName: name,
-          checkIn: checkIn,
-          checkOut: null,
-          recordDate: recordDate,
-          isOvernight: true,
-          sourceRows: [row],
-          primaryRow: row,
-          issues: [],
-        };
-        return;
-      }
-
-      if (!hasCheckIn && hasCheckOut) {
-        // 連泊終了
-        if (openStay) {
-          openStay.checkOut = checkOut;
-          openStay.recordDate = recordDate; // 最終レコードの記録日に更新
-          openStay.sourceRows.push(row);
-          stays.push(openStay);
-          openStay = null;
-        } else {
-          // 開始のないまま終了 → 孤立
-          stays.push({
-            childName: name,
-            checkIn: null,
-            checkOut: checkOut,
-            recordDate: recordDate,
-            isOvernight: true,
-            sourceRows: [row],
-            primaryRow: row,
-            issues: ['連泊開始レコード未送信（孤立した連泊終了）'],
-          });
-        }
-        return;
-      }
-
-      // 両方空欄（連泊中日）
-      if (openStay) {
-        openStay.sourceRows.push(row);
-      } else {
-        // 開始のないまま中日 → 孤立
-        stays.push({
-          childName: name,
-          checkIn: null,
-          checkOut: null,
-          recordDate: recordDate,
-          isOvernight: true,
-          sourceRows: [row],
-          primaryRow: row,
-          issues: ['連泊開始レコード未送信（孤立した連泊中日）'],
-        });
-      }
-    });
-
-    // 児童ループ終了時にクローズされていない連泊が残っていれば孤立として出力
-    if (openStay) {
-      openStay.issues.push('連泊終了レコード未送信（オープンのまま）');
-      stays.push(openStay);
+    if (!groups[key]) {
+      groups[key] = {
+        childName: name,
+        checkIn: hasCheckIn ? checkIn : null,
+        checkOut: hasCheckOut ? checkOut : null,
+        recordDate: recordDate,
+        sourceRows: [row],
+        issues: [],
+      };
+    } else {
+      var g = groups[key];
+      g.sourceRows.push(row);
+      // 入退所日時が後続レコードで埋まる場合は採用（運用上同一値であるべきだが、片方欠損レコード救済）
+      if (!g.checkIn && hasCheckIn) g.checkIn = checkIn;
+      if (!g.checkOut && hasCheckOut) g.checkOut = checkOut;
     }
   });
 
-  // 全体を記録日昇順で返す
+  var stays = Object.keys(groups).map(function(key) {
+    var g = groups[key];
+    var primary = pickPrimaryRow_(g.sourceRows, g.checkIn);
+    var primaryRecordDate = new Date(primary[FORM_COL.RECORD_DATE - 1]);
+    var isOvernight = false;
+    if (g.checkIn && g.checkOut) {
+      var inDay = new Date(g.checkIn.getFullYear(), g.checkIn.getMonth(), g.checkIn.getDate());
+      var outDay = new Date(g.checkOut.getFullYear(), g.checkOut.getMonth(), g.checkOut.getDate());
+      isOvernight = inDay.getTime() !== outDay.getTime();
+    }
+    return {
+      childName: g.childName,
+      checkIn: g.checkIn,
+      checkOut: g.checkOut,
+      recordDate: isValidDate_(primaryRecordDate) ? primaryRecordDate : g.recordDate,
+      isOvernight: isOvernight,
+      sourceRows: g.sourceRows,
+      primaryRow: primary,
+      issues: g.issues,
+      stayPk: g.checkIn ? buildStayPk_(g.childName, g.checkIn) : '',
+    };
+  });
+
   stays.sort(function(a, b) {
-    var t = a.recordDate.getTime() - b.recordDate.getTime();
+    var ta = a.recordDate ? a.recordDate.getTime() : 0;
+    var tb = b.recordDate ? b.recordDate.getTime() : 0;
+    var t = ta - tb;
     return t !== 0 ? t : a.childName.localeCompare(b.childName);
   });
   return stays;
 }
 
 /**
- * フォーム/確定来館記録の行が連泊フラグONかを判定する
+ * グループ内のソース行から「プライマリ行」を選ぶ
+ * - 記録日 == 入所日（日付一致）の行を優先
+ * - 該当無しの場合は記録日が最も早い行を採用
+ * @param {Array<Array>} rows ソース行
+ * @param {Date|null} checkIn 入所日時
+ * @returns {Array} プライマリ行
+ */
+function pickPrimaryRow_(rows, checkIn) {
+  if (rows.length === 1) return rows[0];
+  if (checkIn instanceof Date) {
+    var inKey = formatDateKey_(new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate()));
+    for (var i = 0; i < rows.length; i++) {
+      var rd = new Date(rows[i][FORM_COL.RECORD_DATE - 1]);
+      if (isValidDate_(rd) && formatDateKey_(rd) === inKey) return rows[i];
+    }
+  }
+  // 記録日昇順で先頭
+  var sorted = rows.slice().sort(function(a, b) {
+    var ra = new Date(a[FORM_COL.RECORD_DATE - 1]);
+    var rb = new Date(b[FORM_COL.RECORD_DATE - 1]);
+    return (ra.getTime() || 0) - (rb.getTime() || 0);
+  });
+  return sorted[0];
+}
+
+/**
+ * 旧API互換: pairStayRecords_ のラッパー
+ * 既存の呼び出し側を順次差し替えるための暫定。Phase 3 で削除予定。
+ * @deprecated pairStayRecords_ を直接呼び出すこと
+ */
+function pairOvernightRecords_(formResponses) {
+  return pairStayRecords_(formResponses);
+}
+
+/**
+ * 宿泊PK文字列を生成する
+ * 形式: "<児童名>|<入所日時ISO>"（例: "aさん|2026-04-30T21:00:00"）
+ * 入所日時はタイムゾーン依存を避けるためスクリプトTZでフォーマット
+ * @param {string} childName 児童名
+ * @param {Date} checkIn 入所日時
+ * @returns {string} 宿泊PK
+ */
+function buildStayPk_(childName, checkIn) {
+  if (!childName || !(checkIn instanceof Date) || isNaN(checkIn.getTime())) return '';
+  var iso = Utilities.formatDate(checkIn, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
+  return String(childName) + '|' + iso;
+}
+
+/**
+ * フォーム/確定来館記録の行が連泊扱いかを判定する
+ * 新仕様: 入所日と退所日が異なる行を連泊とみなす（旧 OVERNIGHT_FLAG 列の値は補助として使用）
  * @param {Array} row フォーム回答 or 確定来館記録の1行
  * @param {boolean} [fromConfirmed=false] true=CONFIRMED_COL基準、false=FORM_COL基準
  * @returns {boolean}
  */
 function isOvernightRow_(row, fromConfirmed) {
-  var col = fromConfirmed ? CONFIRMED_COL.OVERNIGHT_FLAG : FORM_COL.OVERNIGHT_FLAG;
-  var v = row[col - 1];
+  var checkInCol = fromConfirmed ? CONFIRMED_COL.CHECK_IN : FORM_COL.CHECK_IN;
+  var checkOutCol = fromConfirmed ? CONFIRMED_COL.CHECK_OUT : FORM_COL.CHECK_OUT;
+  var checkIn = row[checkInCol - 1];
+  var checkOut = row[checkOutCol - 1];
+  if ((checkIn instanceof Date) && (checkOut instanceof Date) && checkIn.getFullYear() >= 1900 && checkOut.getFullYear() >= 1900) {
+    var inDay = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+    var outDay = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
+    if (inDay.getTime() !== outDay.getTime()) return true;
+  }
+  // フォールバック: 旧 OVERNIGHT_FLAG 列の値（移行期データ向け）
+  var flagCol = fromConfirmed ? CONFIRMED_COL.OVERNIGHT_FLAG : FORM_COL.OVERNIGHT_FLAG;
+  var v = row[flagCol - 1];
   if (v === true) return true;
   if (v === false || v === '' || v == null) return false;
   var s = String(v).trim().toLowerCase();

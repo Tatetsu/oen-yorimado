@@ -101,7 +101,7 @@ function allocateRemainingPoints_(year, month) {
 
   // 2. フォーム回答から対象月の実来館データ取得（連泊ペアリング後）
   var formResponses = getFormResponsesByMonth(year, month);
-  var stays = pairOvernightRecords_(formResponses);
+  var stays = pairStayRecords_(formResponses);
 
   // 3. 児童名ごとの実来館回数と来館日マップを作成（対象月の日数のみカウント・月またぎ対応）
   var visitCountMap = {};
@@ -291,6 +291,8 @@ function allocateRemainingPoints_(year, month) {
           pickRandomFromPool_(defaults.medicineNightPool), // 服薬(夜)（行ごとランダム）
           pickRandomFromPool_(defaults.medicineMorningPool), // 服薬(朝)（行ごとランダム）
           pickRandomNote_(),                               // その他連絡事項（行ごとランダム）
+          false,                                           // 連泊フラグ（振り分け行は単泊扱い）
+          '',                                              // 宿泊PK（振り分け行は空）
         ]);
 
         dailyVisitCounts[selectedKey]++;
@@ -389,7 +391,7 @@ function clearAllocationsForMonth_(year, month) {
   var lastRow = sheet.getLastRow();
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
-  var colCount = CONFIRMED_COL.NOTES; // 列数=17
+  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=19)
   var rowCount = lastRow - CONFIRMED_DATA_START_ROW + 1;
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, rowCount, colCount).getValues();
 
@@ -415,11 +417,11 @@ function clearAllocationsForMonth_(year, month) {
 
 /**
  * 振り分け結果を確定来館記録シートに追加書き込みする
- * @param {Array<Array>} results 振り分け結果の2次元配列（17列: CONFIRMED_COL と同じ形式）
+ * @param {Array<Array>} results 振り分け結果の2次元配列（19列: CONFIRMED_COL と同じ形式）
  */
 function writeAllocationsToConfirmed_(results) {
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
-  var colCount = CONFIRMED_COL.NOTES; // 列の末尾=総数（NOTES=17）
+  var colCount = CONFIRMED_COL.STAY_PK; // 列の末尾=総数（STAY_PK=19）
 
   // 既存データと振り分け結果をマージして日付順にソートし直す
   var lastRow = sheet.getLastRow();
@@ -690,7 +692,7 @@ function fillStaff2ForFullDays_(year, month) {
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
   var numRows = lastRow - CONFIRMED_DATA_START_ROW + 1;
-  var colCount = CONFIRMED_COL.NOTES; // 17
+  var colCount = CONFIRMED_COL.STAY_PK; // 19
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, colCount).getValues();
 
   // 対象月の行インデックスを収集。
