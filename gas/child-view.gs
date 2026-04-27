@@ -128,13 +128,13 @@ function writeChildVisitHistory_(sheet, childName, scope) {
 }
 
 /**
- * 来館履歴エリアをクリアする（値・背景色を14列分リセット）
+ * 来館履歴エリアをクリアする（値・背景色を16列分リセット）
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet 児童別ビューシート
  */
 function clearChildVisitHistory_(sheet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < CHILD_VIEW_HISTORY_START_ROW) return;
-  var range = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, lastRow - CHILD_VIEW_HISTORY_START_ROW + 1, 14);
+  var range = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, lastRow - CHILD_VIEW_HISTORY_START_ROW + 1, 16);
   range.clearContent();
   range.setBackground(null);
 }
@@ -154,6 +154,8 @@ function extractChildHistory_(visits, childName) {
         row[CONFIRMED_COL.STAFF_NAME - 1],
         row[CONFIRMED_COL.CHECK_IN - 1],
         row[CONFIRMED_COL.CHECK_OUT - 1],
+        row[CONFIRMED_COL.PICKUP_OUTBOUND - 1],
+        row[CONFIRMED_COL.PICKUP_RETURN - 1],
         row[CONFIRMED_COL.TEMPERATURE - 1],
         row[CONFIRMED_COL.MEAL_DINNER - 1],
         row[CONFIRMED_COL.MEAL_BREAKFAST - 1],
@@ -182,7 +184,7 @@ function extractChildHistory_(visits, childName) {
  * @param {Array<Array>} historyData 来館履歴データ
  */
 function writeHistoryToSheet_(sheet, historyData) {
-  var dataRange = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 14);
+  var dataRange = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 16);
   dataRange.setValues(historyData);
 
   // 記録日列の表示形式
@@ -193,15 +195,15 @@ function writeHistoryToSheet_(sheet, historyData) {
   sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 3, historyData.length, 2)
     .setNumberFormat('HH:mm');
 
-  // 体温列の表示形式（列5）
-  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 5, historyData.length, 1)
+  // 体温列の表示形式（列7）
+  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 7, historyData.length, 1)
     .setNumberFormat('0.0');
 
   // データ行の罫線（印刷向け）
   dataRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
 
   // データ行の中央寄せ（連絡事項以外）
-  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 10)
+  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 15)
     .setHorizontalAlignment('center');
 
   Logger.log('来館履歴を書き込みました: ' + historyData.length + '件');

@@ -157,7 +157,9 @@ const DAY_OF_WEEK_MAP = {
 
 // 確定来館記録の列インデックス（1始まり）
 // FORM_COL と同じ粒度で食事・服薬を分離する
-// 1列目=DATA_TYPE はフォームの TIMESTAMP と同位置。2列目以降は FORM_COL と一致する
+// 1列目=DATA_TYPE はフォームの TIMESTAMP と同位置。
+// CHECK_OUT の直後に PICKUP_OUTBOUND/PICKUP_RETURN（送迎の往/復）が入る
+//   → 月別の単純合計で送迎加算カウントが取れる（月またぎ・連泊にも対応）
 // OVERNIGHT_FLAG: 連泊フラグ（入所日と退所日が異なる行で true）
 // STAY_PK: 宿泊単位のユニークキー（児童名|入所日時ISO）。最終列・既定で非表示。
 const CONFIRMED_COL = {
@@ -168,18 +170,20 @@ const CONFIRMED_COL = {
   CHILD_NAME: 5,
   CHECK_IN: 6,             // 入所日時（ペアリング後の論理1宿泊の値）
   CHECK_OUT: 7,            // 退所予定日時（ペアリング後の論理1宿泊の値）
-  TEMPERATURE: 8,
-  MEAL_DINNER: 9,          // 夕食
-  MEAL_BREAKFAST: 10,      // 朝食
-  MEAL_LUNCH: 11,          // 昼食
-  BATH: 12,
-  SLEEP: 13,
-  BOWEL: 14,
-  MEDICINE_NIGHT: 15,      // 服薬(夜)
-  MEDICINE_MORNING: 16,    // 服薬(朝)
-  NOTES: 17,
-  OVERNIGHT_FLAG: 18,      // 連泊フラグ（true/false）
-  STAY_PK: 19,             // 宿泊PK（児童名|入所日時ISO）
+  PICKUP_OUTBOUND: 8,      // 送迎(往): 記録日が入所日と一致 → 1
+  PICKUP_RETURN: 9,        // 送迎(復): 記録日が退所予定日と一致 → 1
+  TEMPERATURE: 10,
+  MEAL_DINNER: 11,         // 夕食
+  MEAL_BREAKFAST: 12,      // 朝食
+  MEAL_LUNCH: 13,          // 昼食
+  BATH: 14,
+  SLEEP: 15,
+  BOWEL: 16,
+  MEDICINE_NIGHT: 17,      // 服薬(夜)
+  MEDICINE_MORNING: 18,    // 服薬(朝)
+  NOTES: 19,
+  OVERNIGHT_FLAG: 20,      // 連泊フラグ（true/false）
+  STAY_PK: 21,             // 宿泊PK（児童名|入所日時ISO）
 };
 
 // メール件名のデフォルト値（設定シート未設定時のフォールバック）

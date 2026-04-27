@@ -18,7 +18,7 @@ function updateConfirmedVisits(year, month) {
   }
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
   var filterByMonth = (month !== undefined && month !== null);
-  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=19)
+  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=21)
 
   // 既存データを全件取得
   var lastRow = sheet.getLastRow();
@@ -71,12 +71,27 @@ function updateConfirmedVisits(year, month) {
     }
 
     var stayDates = expandStayToDates_(recordDate, checkInFull, checkOutFull);
+    var checkInKey = (checkInFull instanceof Date) ? formatDateKey_(checkInFull) : null;
+    var checkOutKey = (checkOutFull instanceof Date) ? formatDateKey_(checkOutFull) : null;
     stayDates.forEach(function(stayDate) {
       // スコープ外の日付は除外
       if (filterByMonth) {
         if (stayDate.getFullYear() !== year || (stayDate.getMonth() + 1) !== month) return;
       } else {
         if (stayDate.getFullYear() !== year) return;
+      }
+      var stayDateKey = formatDateKey_(stayDate);
+      var isCheckInDay = (checkInKey && stayDateKey === checkInKey);
+      var isCheckOutDay = (checkOutKey && stayDateKey === checkOutKey);
+      // 入所日のみ → 往=1 / 退所日のみ → 復=1 / 連泊の中日（どちらでもない）→ 両方1
+      // 同日入退所（単日）→ 両条件マッチで両方1
+      var pickupOutbound, pickupReturn;
+      if (!isCheckInDay && !isCheckOutDay) {
+        pickupOutbound = 1;
+        pickupReturn = 1;
+      } else {
+        pickupOutbound = isCheckInDay ? 1 : '';
+        pickupReturn = isCheckOutDay ? 1 : '';
       }
       newRows.push([
         '実データ',                                 // データ区分
@@ -86,6 +101,8 @@ function updateConfirmedVisits(year, month) {
         primary[FORM_COL.CHILD_NAME - 1],         // 児童名
         checkInFull,                               // 入所日時（ペアリング後の値）
         checkOutFull,                              // 退所予定日時（ペアリング後の値）
+        pickupOutbound,                            // 送迎(往)
+        pickupReturn,                              // 送迎(復)
         primary[FORM_COL.TEMPERATURE - 1],        // 体温
         primary[FORM_COL.MEAL_DINNER - 1],        // 夕食
         primary[FORM_COL.MEAL_BREAKFAST - 1],     // 朝食

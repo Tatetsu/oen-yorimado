@@ -281,6 +281,8 @@ function allocateRemainingPoints_(year, month) {
           childName,                                       // 児童名
           checkInDT,                                       // 入所日時
           checkOutDT,                                      // 退所日時（翌朝固定）
+          1,                                               // 送迎(往): 振り分け行は記録日=入所日
+          '',                                              // 送迎(復): 振り分け行は退所が翌日のため空
           pickRandomFromPool_(defaults.temperaturePool),   // 体温（行ごとランダム）
           pickRandomFromPool_(defaults.mealDinnerPool),    // 夕食（行ごとランダム）
           pickRandomFromPool_(defaults.mealBreakfastPool), // 朝食（行ごとランダム）
@@ -391,7 +393,7 @@ function clearAllocationsForMonth_(year, month) {
   var lastRow = sheet.getLastRow();
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
-  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=19)
+  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=21)
   var rowCount = lastRow - CONFIRMED_DATA_START_ROW + 1;
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, rowCount, colCount).getValues();
 
@@ -417,11 +419,11 @@ function clearAllocationsForMonth_(year, month) {
 
 /**
  * 振り分け結果を確定来館記録シートに追加書き込みする
- * @param {Array<Array>} results 振り分け結果の2次元配列（19列: CONFIRMED_COL と同じ形式）
+ * @param {Array<Array>} results 振り分け結果の2次元配列（21列: CONFIRMED_COL と同じ形式）
  */
 function writeAllocationsToConfirmed_(results) {
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
-  var colCount = CONFIRMED_COL.STAY_PK; // 列の末尾=総数（STAY_PK=19）
+  var colCount = CONFIRMED_COL.STAY_PK; // 列の末尾=総数（STAY_PK=21）
 
   // 既存データと振り分け結果をマージして日付順にソートし直す
   var lastRow = sheet.getLastRow();
@@ -692,7 +694,7 @@ function fillStaff2ForFullDays_(year, month) {
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
   var numRows = lastRow - CONFIRMED_DATA_START_ROW + 1;
-  var colCount = CONFIRMED_COL.STAY_PK; // 19
+  var colCount = CONFIRMED_COL.STAY_PK; // 21
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, colCount).getValues();
 
   // 対象月の行インデックスを収集。
