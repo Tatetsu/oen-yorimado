@@ -1151,6 +1151,118 @@ function getNotesMasterData_() {
 }
 
 /**
+ * スタッフマスタから曜日別の稼働スタッフマップを構築する
+ * スタッフマスタ列: A=No, B=スタッフ名, C=よみがな, D=区分1, E=区分2, F-J=曜日1〜曜日5
+ * 曜日列の値は「月曜日」「水曜日」等。DAY_OF_WEEK_MAP で 0-6 に変換
+ * @returns {Object} { 0:[...日曜稼働スタッフ], 1:[...月曜], ..., 6:[...土曜] }
+ */
+function getActiveStaffByWeekday_() {
+  var map = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.STAFF_MASTER);
+    if (!sheet) return map;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return map;
+    // A〜J(=10列)を取得。曜日1〜5は F〜J (列6〜10)
+    var data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+    data.forEach(function(row) {
+      var name = String(row[1] || '').trim(); // B列=スタッフ名
+      if (!name) return;
+      for (var c = 5; c <= 9; c++) { // F〜J列(0始まりで5〜9)
+        var dayStr = String(row[c] || '').trim();
+        if (!dayStr) continue;
+        var firstChar = dayStr.charAt(0);
+        var dayNum = DAY_OF_WEEK_MAP[firstChar];
+        if (dayNum === undefined) continue;
+        if (map[dayNum].indexOf(name) === -1) {
+          map[dayNum].push(name);
+        }
+      }
+    });
+  } catch (e) {
+    Logger.log('getActiveStaffByWeekday_ エラー: ' + e.message);
+  }
+  return map;
+}
+
+/**
+ * 重み付き選択肢からランダムに1要素を取得する
+ * @param {Array<{value:*, weight:number}>} weighted 重み付き候補
+ * @returns {*} 選ばれた値
+ */
+function pickWeightedRandom_(weighted) {
+  if (!weighted || weighted.length === 0) return '';
+  var total = 0;
+  for (var i = 0; i < weighted.length; i++) total += weighted[i].weight;
+  if (total <= 0) return weighted[0].value;
+  var r = Math.random() * total;
+  var acc = 0;
+  for (var j = 0; j < weighted.length; j++) {
+    acc += weighted[j].weight;
+    if (r < acc) return weighted[j].value;
+  }
+  return weighted[weighted.length - 1].value;
+}
+
+/**
+ * 振り分け行のフォーム選択肢ベース・加重ランダムプール
+ * フォームの選択肢（docs/specs/google-form.md）に沿って現実的な分布を定義
+ * @returns {Object} 各項目のジェネレータ関数
+ */
+function getAllocationRandomGenerators_() {
+  var meal = [
+    { value: '完食', weight: 5 },
+    { value: '半分', weight: 3 },
+    { value: '○',    weight: 1 },
+    { value: '△',    weight: 1 },
+    { value: '×',    weight: 0.5 },
+    { value: '-',    weight: 0.5 },
+  ];
+  var lunch = [
+    { value: '-',    weight: 9 },
+    { value: '完食', weight: 1 },
+  ];
+  var oxStandard = [
+    { value: '○', weight: 8 },
+    { value: '×', weight: 1 },
+    { value: '△', weight: 0.5 },
+    { value: '-', weight: 0.5 },
+  ];
+  var bowel = [
+    { value: '○', weight: 5 },
+    { value: '×', weight: 4 },
+    { value: '△', weight: 0.5 },
+    { value: '-', weight: 0.5 },
+  ];
+  return {
+    temperature: function() {
+      // 36.0〜36.9 を 36.5 寄りで生成
+      var pool = [
+        { value: 36.0, weight: 1 },
+        { value: 36.1, weight: 1 },
+        { value: 36.2, weight: 2 },
+        { value: 36.3, weight: 3 },
+        { value: 36.4, weight: 5 },
+        { value: 36.5, weight: 7 },
+        { value: 36.6, weight: 5 },
+        { value: 36.7, weight: 3 },
+        { value: 36.8, weight: 2 },
+        { value: 36.9, weight: 1 },
+      ];
+      return pickWeightedRandom_(pool);
+    },
+    mealDinner: function() { return pickWeightedRandom_(meal); },
+    mealBreakfast: function() { return pickWeightedRandom_(meal); },
+    mealLunch: function() { return pickWeightedRandom_(lunch); },
+    bath: function() { return pickWeightedRandom_(oxStandard); },
+    sleep: function() { return pickWeightedRandom_(oxStandard); },
+    bowel: function() { return pickWeightedRandom_(bowel); },
+    medicineNight: function() { return pickWeightedRandom_(oxStandard); },
+    medicineMorning: function() { return pickWeightedRandom_(oxStandard); },
+  };
+}
+
+/**
  * エラーをログシートに記録する
  * @param {string} functionName エラーが発生した関数名
  * @param {Error} error エラーオブジェクト

@@ -180,6 +180,22 @@ function allocateRemainingPoints_(year, month) {
     childDefaultsMap[childName] = computeChildDefaults_(childName, row, formResponses);
   });
 
+  // スタッフ稼働曜日マップ（曜日ごとの稼働スタッフ）と日ごとの担当スタッフキャッシュ
+  var staffByWeekday = getActiveStaffByWeekday_();
+  var fallbackStaff = getDummyStaffName_();
+  var dailyStaffMap = {}; // {dateKey: staffName} 同日同一スタッフ保証
+  var pickStaffForDate_ = function(date) {
+    var key = formatDateKey_(date);
+    if (dailyStaffMap[key]) return dailyStaffMap[key];
+    var pool = staffByWeekday[date.getDay()] || [];
+    var name = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : fallbackStaff;
+    dailyStaffMap[key] = name;
+    return name;
+  };
+
+  // フォーム選択肢ベースの加重ランダムジェネレータ（行ごとに値生成）
+  var randomGen = getAllocationRandomGenerators_();
+
   // 年間利用枠チェック用: 当年の確定来館記録（実データ+振り分け）を集計
   var ytdVisitMap = buildYtdVisitMap_(year);
 
@@ -245,6 +261,22 @@ function allocateRemainingPoints_(year, month) {
       }
     });
 
+    // 同一児童の連続日抑制用: 既存の実来館日 + これまで振り分けた日 を記録
+    var childOccupiedKeys = {};
+    Object.keys(childVisitDates).forEach(function(k) { childOccupiedKeys[k] = true; });
+    // 隣接日ペナルティ: dailyVisitCounts の取り得る最大値より十分大きく、
+    //   かつ「空きが本当にない月」では連続日も許容するためのソフト制約
+    var ADJACENCY_PENALTY = 100;
+    var scoreDate_ = function(date) {
+      var key = formatDateKey_(date);
+      var s = dailyVisitCounts[key] || 0;
+      var prevKey = formatDateKey_(new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
+      var nextKey = formatDateKey_(new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1));
+      if (childOccupiedKeys[prevKey]) s += ADJACENCY_PENALTY;
+      if (childOccupiedKeys[nextKey]) s += ADJACENCY_PENALTY;
+      return s;
+    };
+
     // 来館曜日優先 → その他で足りない分を補う
     var allocated = 0;
     var candidatePools = [preferredDates, otherDates];
@@ -253,9 +285,9 @@ function allocateRemainingPoints_(year, month) {
       var pool = candidatePools[poolIdx];
 
       while (allocated < remaining && pool.length > 0) {
-        // 来館数が最も少ない日を選択（均等分散）
+        // 来館数が最も少ない日を選択（均等分散）+ 同一児童の連続日にはペナルティ
         pool.sort(function(a, b) {
-          return dailyVisitCounts[formatDateKey_(a)] - dailyVisitCounts[formatDateKey_(b)];
+          return scoreDate_(a) - scoreDate_(b);
         });
 
         var selectedDate = pool.shift();
@@ -272,33 +304,73 @@ function allocateRemainingPoints_(year, month) {
         if (checkOutDT.getTime() <= checkInDT.getTime()) {
           checkOutDT = new Date(checkOutDT.getTime() + 24 * 60 * 60 * 1000);
         }
+        var checkOutDate = new Date(checkOutDT.getFullYear(), checkOutDT.getMonth(), checkOutDT.getDate());
+        var isOvernight = (selectedDate.getTime() !== checkOutDate.getTime());
+        // 退所日が対象月外（=月末またぎ）の場合は退所日行は作らない（実データの月別フィルタと同じ挙動）
+        var checkOutInScope = (checkOutDate.getFullYear() === year && (checkOutDate.getMonth() + 1) === month);
+        var generateCheckoutRow = isOvernight && checkOutInScope;
+        // 月間利用枠を「日数」で消費するため、連泊の2日消費でオーバーシュートする場合はこの候補をスキップ
+        if (generateCheckoutRow && allocated + 2 > remaining) continue;
+        var stayPk = isOvernight ? buildStayPk_(childName, checkInDT) : '';
 
-        allocationResults.push([
-          '振り分け',                                       // データ区分
-          selectedDate,                                    // 記録日
-          defaults.staffName,                              // スタッフ1（固定スタッフ）
-          defaults.staffName2,                             // スタッフ2（固定スタッフ）
-          childName,                                       // 児童名
-          checkInDT,                                       // 入所日時
-          checkOutDT,                                      // 退所日時（翌朝固定）
-          1,                                               // 送迎(往): 振り分け行は記録日=入所日
-          '',                                              // 送迎(復): 振り分け行は退所が翌日のため空
-          pickRandomFromPool_(defaults.temperaturePool),   // 体温（行ごとランダム）
-          pickRandomFromPool_(defaults.mealDinnerPool),    // 夕食（行ごとランダム）
-          pickRandomFromPool_(defaults.mealBreakfastPool), // 朝食（行ごとランダム）
-          defaults.mealLunch,                              // 昼食（固定）
-          pickRandomFromPool_(defaults.bathPool),          // 入浴（行ごとランダム）
-          pickRandomFromPool_(defaults.sleepPool),         // 睡眠（行ごとランダム）
-          pickRandomFromPool_(defaults.bowelPool),         // 便（行ごとランダム）
-          pickRandomFromPool_(defaults.medicineNightPool), // 服薬(夜)（行ごとランダム）
-          pickRandomFromPool_(defaults.medicineMorningPool), // 服薬(朝)（行ごとランダム）
-          pickRandomNote_(),                               // その他連絡事項（行ごとランダム）
-          false,                                           // 連泊フラグ（振り分け行は単泊扱い）
-          '',                                              // 宿泊PK（振り分け行は空）
-        ]);
+        // 1宿泊=フォーム1レコード相当の値を1度だけ生成し、入所日行/退所日行で複製する
+        // （実データはフォーム1回送信→確定来館記録で複製の流れ。同じ内容で記録日と往/復のみ変わる）
+        var stayStaff = pickStaffForDate_(selectedDate);
+        var stayValues = {
+          temperature: randomGen.temperature(),
+          mealDinner: randomGen.mealDinner(),
+          mealBreakfast: randomGen.mealBreakfast(),
+          mealLunch: randomGen.mealLunch(),
+          bath: randomGen.bath(),
+          sleep: randomGen.sleep(),
+          bowel: randomGen.bowel(),
+          medicineNight: randomGen.medicineNight(),
+          medicineMorning: randomGen.medicineMorning(),
+          notes: pickRandomNote_(),
+        };
+
+        var buildRow_ = function(recordDate, pickupOutbound, pickupReturn) {
+          return [
+            '振り分け',
+            recordDate,
+            stayStaff,
+            '',
+            childName,
+            checkInDT,
+            checkOutDT,
+            pickupOutbound,
+            pickupReturn,
+            stayValues.temperature,
+            stayValues.mealDinner,
+            stayValues.mealBreakfast,
+            stayValues.mealLunch,
+            stayValues.bath,
+            stayValues.sleep,
+            stayValues.bowel,
+            stayValues.medicineNight,
+            stayValues.medicineMorning,
+            stayValues.notes,
+            isOvernight,
+            stayPk,
+          ];
+        };
+
+        // 入所日行（記録日=入所日、往=1、復は退所日行で立つので空）
+        allocationResults.push(buildRow_(selectedDate, 1, ''));
+
+        // 退所日行（対象月内に退所が収まる場合のみ複製。月またぎは欠落）
+        if (generateCheckoutRow) {
+          allocationResults.push(buildRow_(checkOutDate, '', 1));
+        }
 
         dailyVisitCounts[selectedKey]++;
-        allocated++;
+        childOccupiedKeys[selectedKey] = true;
+        if (isOvernight && checkOutInScope) {
+          // 退所日も同児童の連続日抑制対象に追加（実データ集計の通し日付として扱う）
+          childOccupiedKeys[formatDateKey_(checkOutDate)] = true;
+        }
+        // 月間利用枠は「日数」で消費する。連泊で対象月内に退所する場合は2日分を消費
+        allocated += generateCheckoutRow ? 2 : 1;
       }
     }
 
