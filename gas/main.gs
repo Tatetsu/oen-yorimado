@@ -21,7 +21,7 @@ function onOpen() {
 
 /**
  * 月次一括処理: 月別集計 → 振り分け → 確定来館記録 → 来館カレンダーを一括実行する
- * 選択肢は前月までに制限（未来月は非表示）
+ * 選択肢は当月までに制限（未来月は非表示）
  */
 function runMonthlyProcess() {
   var ui = SpreadsheetApp.getUi();
@@ -29,7 +29,7 @@ function runMonthlyProcess() {
   try {
     var years = generateProcessableYears_();
     if (years.length === 0) {
-      ui.alert('処理可能な月がありません（前月以前のデータがありません）');
+      ui.alert('処理可能な月がありません（当月以前のデータがありません）');
       return;
     }
 
@@ -319,23 +319,63 @@ function filterConfirmedVisits_() {
 /**
  * 確定来館記録を手動更新し、来館カレンダーも連動更新する
  * メニュー「確定来館記録を手動更新」から実行される
+ * 月次一括処理と同じ 2段プロンプト（年→月）で対象スコープを選ばせ、
+ * 月選択時はその月、「年次一括処理」選択時はその年の実データを洗い替える
  */
 function updateConfirmedVisitsAndCalendar() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
   var originalSheet = ss.getActiveSheet();
   try {
-    // 申請済みの振り分け行がある月を検出し、更新前に確認を取る
-    var allocatedMonths = listAllocatedMonths_();
-    if (allocatedMonths.length > 0) {
-      var shown = allocatedMonths.slice(0, 20).map(function(ym) {
+    // Stage 1: 年選択
+    var years = generateProcessableYears_();
+    if (years.length === 0) {
+      ui.alert('処理可能な月がありません（当月以前のデータがありません）');
+      return;
+    }
+    var yearPrompt = '対象年を選択してください（番号を入力）:\n\n';
+    for (var i = 0; i < years.length; i++) {
+      yearPrompt += i + '. ' + years[i] + '年\n';
+    }
+    var yearResponse = ui.prompt('確定来館記録を手動更新 - 年選択', yearPrompt, ui.ButtonSet.OK_CANCEL);
+    if (yearResponse.getSelectedButton() !== ui.Button.OK) return;
+    var yearIdx = parseInt(yearResponse.getResponseText().trim(), 10);
+    if (isNaN(yearIdx) || yearIdx < 0 || yearIdx >= years.length) {
+      ui.alert('無効な番号です。0〜' + (years.length - 1) + 'の番号を入力してください。');
+      return;
+    }
+    var selectedYear = years[yearIdx];
+
+    // Stage 2: 月選択（先頭は年次一括）
+    var monthOptions = generateMonthOptionsForYear_(selectedYear);
+    var monthPrompt = '対象月を選択してください（番号を入力）:\n\n';
+    for (var j = 0; j < monthOptions.length; j++) {
+      monthPrompt += j + '. ' + monthOptions[j].label + '\n';
+    }
+    var monthResponse = ui.prompt('確定来館記録を手動更新 - ' + selectedYear + '年', monthPrompt, ui.ButtonSet.OK_CANCEL);
+    if (monthResponse.getSelectedButton() !== ui.Button.OK) return;
+    var monthIdx = parseInt(monthResponse.getResponseText().trim(), 10);
+    if (isNaN(monthIdx) || monthIdx < 0 || monthIdx >= monthOptions.length) {
+      ui.alert('無効な番号です。0〜' + (monthOptions.length - 1) + 'の番号を入力してください。');
+      return;
+    }
+    var selected = monthOptions[monthIdx];
+    var isAnnual = (selected.kind === 'annual');
+    var targetMonth = isAnnual ? null : selected.month;
+
+    // 振り分け済みチェック（選択スコープ内に限定）
+    var allocatedInScope = listAllocatedMonths_().filter(function(ym) {
+      if (ym.year !== selectedYear) return false;
+      return isAnnual ? true : (ym.month === targetMonth);
+    });
+    if (allocatedInScope.length > 0) {
+      var shown = allocatedInScope.map(function(ym) {
         return '・' + ym.year + '年' + ym.month + '月';
       });
-      var more = allocatedMonths.length > 20 ? '\n（他 ' + (allocatedMonths.length - 20) + ' 件）' : '';
       var proceed = ui.alert(
         '振り分け済みの月があります',
         '以下の月には既に振り分け（申請用データ）が登録されています:\n\n' +
-        shown.join('\n') + more + '\n\n' +
+        shown.join('\n') + '\n\n' +
         '実データを更新すると、振り分け行はそのまま残りますが\n' +
         '実来館との整合性が崩れる可能性があります。\n\n' +
         'このまま更新しますか？',
@@ -344,15 +384,23 @@ function updateConfirmedVisitsAndCalendar() {
       if (proceed !== ui.Button.YES) return;
     }
 
-    ss.toast('確定来館記録を更新中...', '処理中', -1);
+    var scopeLabel = isAnnual ? (selectedYear + '年') : (selectedYear + '年' + targetMonth + '月');
+    ss.toast(scopeLabel + ' の確定来館記録を更新中...', '処理中', -1);
 
-    updateConfirmedVisits();
+    if (isAnnual) {
+      updateConfirmedVisits(selectedYear);
+    } else {
+      updateConfirmedVisits(selectedYear, targetMonth);
+    }
 
     ss.toast('来館カレンダーを更新中...', '処理中', -1);
 
+    var calendarSheet = getSheet(SHEET_NAMES.VISIT_CALENDAR);
+    calendarSheet.getRange('B1').setValue(selectedYear + '年');
+    calendarSheet.getRange('B2').setValue(isAnnual ? 'すべて' : (targetMonth + '月'));
     updateVisitCalendar();
 
-    ss.toast('確定来館記録と来館カレンダーの更新が完了しました', '完了', 3);
+    ss.toast(scopeLabel + ' の確定来館記録と来館カレンダーを更新しました', '完了', 3);
   } catch (error) {
     logError_('updateConfirmedVisitsAndCalendar', error);
     SpreadsheetApp.getUi().alert('エラーが発生しました: ' + error.message);
@@ -363,28 +411,26 @@ function updateConfirmedVisitsAndCalendar() {
 
 /**
  * 月次一括処理で選択可能な年リストを降順で返す
- * フォーム回答に存在する年のうち、前月以前のデータが対象になり得る年のみ
+ * フォーム回答に存在する年のうち、当月以前のデータが対象になり得る年のみ
  * @returns {Array<number>}
  */
 function generateProcessableYears_() {
   var now = new Date();
-  var lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  var lastY = lastMonth.getFullYear();
-  return collectYearsFromFormResponses_().filter(function(y) { return y <= lastY; });
+  var currentY = now.getFullYear();
+  return collectYearsFromFormResponses_().filter(function(y) { return y <= currentY; });
 }
 
 /**
  * 指定年で選択可能な月オプションを生成する（先頭に年次一括処理を含む）
- * 前月年は1〜前月、それ以前の年は1〜12月を対象
+ * 当年は1〜当月、それ以前の年は1〜12月を対象
  * @param {number} year 対象年
  * @returns {Array<{kind:string, year:number, month:number=, label:string}>}
  */
 function generateMonthOptionsForYear_(year) {
   var now = new Date();
-  var lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  var lastY = lastMonth.getFullYear();
-  var lastM = lastMonth.getMonth() + 1;
-  var maxMonth = (year === lastY) ? lastM : 12;
+  var currentY = now.getFullYear();
+  var currentM = now.getMonth() + 1;
+  var maxMonth = (year === currentY) ? currentM : 12;
   var options = [{ kind: 'annual', year: year, label: '年次一括処理' }];
   for (var m = 1; m <= maxMonth; m++) {
     options.push({ kind: 'month', year: year, month: m, label: m + '月' });

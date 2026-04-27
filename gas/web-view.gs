@@ -226,7 +226,6 @@ function updateFormResponseWeb(token, rowIndex, data) {
       data.childName,
       checkIn,
       checkOut,
-      data.isOvernight ? true : false,
       (data.temperature !== '' && data.temperature !== null) ? parseFloat(data.temperature) : '',
       data.mealDinner || '',
       data.mealBreakfast || '',
@@ -237,10 +236,11 @@ function updateFormResponseWeb(token, rowIndex, data) {
       data.medicineNight || '',
       data.medicineMorning || '',
       data.notes || '',
+      data.overnight === '連泊' ? '連泊' : '',
     ]];
 
-    // RECORD_DATE(col 2) から NOTES(col 18) までの 17 列を書き込む（新列順: 連泊はCHECK_OUT直後）
-    var writeWidth = FORM_COL.NOTES - FORM_COL.RECORD_DATE + 1;
+    // RECORD_DATE(col 2) から OVERNIGHT_FLAG(col 18) までの 17 列を書き込む（連泊フラグは連絡事項の直後）
+    var writeWidth = FORM_COL.OVERNIGHT_FLAG - FORM_COL.RECORD_DATE + 1;
     sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, writeWidth).setValues(values);
     sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, 1).setNumberFormat('yyyy/mm/dd');
     if (checkIn instanceof Date) {

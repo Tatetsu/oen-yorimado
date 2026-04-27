@@ -85,27 +85,28 @@ const FORM_DATA_START_ROW = 2;
 // フォームの回答の列インデックス（1始まり）
 // 行政様式の実績記録票に合わせ、食事は夕/朝/昼、服薬は夜/朝に分離する
 // CHECK_OUT は「退所予定日時」として扱う（連泊初日・中日は空欄可）
-// OVERNIGHT_FLAG: 連泊フラグ（true=連泊、false/空欄=単泊）。退所予定日時の直後に配置
+// OVERNIGHT_FLAG: 連泊フラグ（true=連泊、false/空欄=単泊）。その他連絡事項の直後（メール送信の直前）
+// 確定来館記録の列順と2列目以降が一致するレイアウト
 const FORM_COL = {
   TIMESTAMP: 1,
   RECORD_DATE: 2,
   STAFF_NAME: 3,           // スタッフ1
-  STAFF_NAME_2: 4,         // スタッフ2（任意）
+  STAFF_NAME_2: 4,         // スタッフ2(任意)
   CHILD_NAME: 5,
-  CHECK_IN: 6,             // 入所日時（連泊・最終日は空欄可）
-  CHECK_OUT: 7,            // 退所予定日時（連泊・初日/中日は空欄可）
-  OVERNIGHT_FLAG: 8,       // 連泊フラグ（true/false）
-  TEMPERATURE: 9,
-  MEAL_DINNER: 10,         // 夕食
-  MEAL_BREAKFAST: 11,      // 朝食
-  MEAL_LUNCH: 12,          // 昼食
-  BATH: 13,
-  SLEEP: 14,
-  BOWEL: 15,
-  MEDICINE_NIGHT: 16,      // 服薬(夜)
-  MEDICINE_MORNING: 17,    // 服薬(朝)
-  NOTES: 18,
-  EMAIL_SENT: 19,          // メール送信済（システム管理・初回送信時に追加）
+  CHECK_IN: 6,             // 入所日時(連泊・最終日は空欄可)
+  CHECK_OUT: 7,            // 退所予定日時(連泊・初日/中日は空欄可)
+  TEMPERATURE: 8,
+  MEAL_DINNER: 9,          // 夕食
+  MEAL_BREAKFAST: 10,      // 朝食
+  MEAL_LUNCH: 11,          // 昼食
+  BATH: 12,
+  SLEEP: 13,
+  BOWEL: 14,
+  MEDICINE_NIGHT: 15,      // 服薬(夜)
+  MEDICINE_MORNING: 16,    // 服薬(朝)
+  NOTES: 17,
+  OVERNIGHT_FLAG: 18,      // 連泊フラグ(true/false)
+  EMAIL_SENT: 19,          // メール送信済(システム管理・初回送信時に追加)
 };
 
 // 月別集計の列インデックス（1始まり）
@@ -156,13 +157,14 @@ const DAY_OF_WEEK_MAP = {
 
 // 確定来館記録の列インデックス（1始まり）
 // FORM_COL と同じ粒度で食事・服薬を分離する
+// 1列目=DATA_TYPE はフォームの TIMESTAMP と同位置。2列目以降は FORM_COL と一致する
 // OVERNIGHT_FLAG: 連泊フラグ（ペアリング後、連泊1宿泊から展開された行は true）
 const CONFIRMED_COL = {
-  RECORD_DATE: 1,
-  CHILD_NAME: 2,
-  DATA_TYPE: 3,
-  STAFF_NAME: 4,           // スタッフ1
-  STAFF_NAME_2: 5,         // スタッフ2（任意）
+  DATA_TYPE: 1,
+  RECORD_DATE: 2,
+  STAFF_NAME: 3,           // スタッフ1
+  STAFF_NAME_2: 4,         // スタッフ2（任意）
+  CHILD_NAME: 5,
   CHECK_IN: 6,             // 入所日時（ペアリング後の論理1宿泊の値）
   CHECK_OUT: 7,            // 退所予定日時（ペアリング後の論理1宿泊の値）
   TEMPERATURE: 8,

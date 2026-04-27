@@ -274,23 +274,23 @@ function allocateRemainingPoints_(year, month) {
         }
 
         allocationResults.push([
-          selectedDate,             // 記録日
-          childName,                // 児童名
-          '振り分け',                // データ区分
-          defaults.staffName,       // スタッフ1（固定スタッフ）
-          defaults.staffName2,      // スタッフ2（固定スタッフ）
-          checkInDT,                // 入所日時（selectedDate + 時刻）
-          checkOutDT,               // 退所日時（selectedDate + 時刻、必要に応じて翌日）
-          defaults.temperature,     // 体温
-          defaults.mealDinner,      // 夕食
-          defaults.mealBreakfast,   // 朝食
-          defaults.mealLunch,       // 昼食
-          defaults.bath,            // 入浴
-          defaults.sleep,           // 睡眠
-          defaults.bowel,           // 便
-          defaults.medicineNight,   // 服薬(夜)
-          defaults.medicineMorning, // 服薬(朝)
-          defaults.notes,           // その他連絡事項
+          '振り分け',                                       // データ区分
+          selectedDate,                                    // 記録日
+          defaults.staffName,                              // スタッフ1（固定スタッフ）
+          defaults.staffName2,                             // スタッフ2（固定スタッフ）
+          childName,                                       // 児童名
+          checkInDT,                                       // 入所日時
+          checkOutDT,                                      // 退所日時（翌朝固定）
+          pickRandomFromPool_(defaults.temperaturePool),   // 体温（行ごとランダム）
+          pickRandomFromPool_(defaults.mealDinnerPool),    // 夕食（行ごとランダム）
+          pickRandomFromPool_(defaults.mealBreakfastPool), // 朝食（行ごとランダム）
+          defaults.mealLunch,                              // 昼食（固定）
+          pickRandomFromPool_(defaults.bathPool),          // 入浴（行ごとランダム）
+          pickRandomFromPool_(defaults.sleepPool),         // 睡眠（行ごとランダム）
+          pickRandomFromPool_(defaults.bowelPool),         // 便（行ごとランダム）
+          pickRandomFromPool_(defaults.medicineNightPool), // 服薬(夜)（行ごとランダム）
+          pickRandomFromPool_(defaults.medicineMorningPool), // 服薬(朝)（行ごとランダム）
+          pickRandomNote_(),                               // その他連絡事項（行ごとランダム）
         ]);
 
         dailyVisitCounts[selectedKey]++;
@@ -330,7 +330,8 @@ function hasAllocationsForMonth_(year, month) {
   if (lastRow < CONFIRMED_DATA_START_ROW) return false;
 
   var targetYM = year + '/' + ('0' + month).slice(-2);
-  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 3).getValues();
+  // データ区分(1)・記録日(2)を読むので最低でも RECORD_DATE まで取得
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.RECORD_DATE).getValues();
   for (var i = 0; i < data.length; i++) {
     var dataType = data[i][CONFIRMED_COL.DATA_TYPE - 1];
     if (dataType !== '振り分け') continue;
@@ -356,7 +357,8 @@ function listAllocatedMonths_() {
   var lastRow = sheet.getLastRow();
   if (lastRow < CONFIRMED_DATA_START_ROW) return [];
 
-  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, 3).getValues();
+  // データ区分(1)・記録日(2)を読むので最低でも RECORD_DATE まで取得
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.RECORD_DATE).getValues();
   var seen = {};
   data.forEach(function(row) {
     if (row[CONFIRMED_COL.DATA_TYPE - 1] !== '振り分け') return;
@@ -430,9 +432,9 @@ function writeAllocationsToConfirmed_(results) {
 
   // 日付昇順 → 児童名昇順でソート
   allData.sort(function(a, b) {
-    var dateCompare = new Date(a[0]) - new Date(b[0]);
+    var dateCompare = new Date(a[CONFIRMED_COL.RECORD_DATE - 1]) - new Date(b[CONFIRMED_COL.RECORD_DATE - 1]);
     if (dateCompare !== 0) return dateCompare;
-    return String(a[1]).localeCompare(String(b[1]));
+    return String(a[CONFIRMED_COL.CHILD_NAME - 1]).localeCompare(String(b[CONFIRMED_COL.CHILD_NAME - 1]));
   });
 
   // 既存データをクリアして書き直し
@@ -443,7 +445,7 @@ function writeAllocationsToConfirmed_(results) {
   sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, colCount).setValues(allData);
 
   // 記録日列の表示形式
-  sheet.getRange(CONFIRMED_DATA_START_ROW, 1, allData.length, 1)
+  sheet.getRange(CONFIRMED_DATA_START_ROW, CONFIRMED_COL.RECORD_DATE, allData.length, 1)
     .setNumberFormat('yyyy/mm/dd');
 
   // 入所日時・退所日時列の表示形式
@@ -528,10 +530,15 @@ function toDateTimeOnDate_(date, timeVal) {
 
 /**
  * 児童の振り分け補完データを実データから算出する
+ * 体温・食事(夕/朝)・入浴・睡眠・便・服薬は行ごとにランダム抽選するため、
+ * ここでは値そのものではなく抽選用の候補配列(プール)を返す
+ * 同児童のフォーム回答にその列の値があれば優先、なければ全児童の回答から、
+ * それでもなければ設定シート値1件をプールに入れる
+ * 入所/退所時刻・昼食は固定運用のため最頻値(なければ設定値)で確定する
  * @param {string} childName 児童名
  * @param {Array} masterRow 児童マスタの行データ
- * @param {Array<Array>} formResponses 同月のフォーム回答データ
- * @returns {Object} 補完データ
+ * @param {Array<Array>} formResponses 同月のフォーム回答データ（全児童分）
+ * @returns {Object} 補完データ（固定値 + 抽選プール）
  */
 function computeChildDefaults_(childName, masterRow, formResponses) {
   // スタッフ1は設定シートの固定スタッフ名。スタッフ2は空欄（7人満枠時のみ fillStaff2ForFullDays_ が補完）
@@ -545,43 +552,52 @@ function computeChildDefaults_(childName, masterRow, formResponses) {
   var childData = formResponses.filter(function(row) {
     return row[FORM_COL.CHILD_NAME - 1] === childName;
   });
-
-  // 実データがある場合は最頻値を算出、なければ設定シート値を使用
-  if (childData.length > 0) {
-    return {
-      staffName: staffName,
-      staffName2: staffName2,
-      checkIn: getModeValue_(childData, FORM_COL.CHECK_IN - 1, settings.CHECK_IN),
-      checkOut: getModeValue_(childData, FORM_COL.CHECK_OUT - 1, settings.CHECK_OUT),
-      temperature: getModeNumeric_(childData, FORM_COL.TEMPERATURE - 1, settings.TEMPERATURE),
-      mealDinner: getModeValue_(childData, FORM_COL.MEAL_DINNER - 1, settings.MEAL_DINNER),
-      mealBreakfast: getModeValue_(childData, FORM_COL.MEAL_BREAKFAST - 1, settings.MEAL_BREAKFAST),
-      mealLunch: getModeValue_(childData, FORM_COL.MEAL_LUNCH - 1, settings.MEAL_LUNCH),
-      bath: getModeValue_(childData, FORM_COL.BATH - 1, settings.BATH),
-      sleep: getModeValue_(childData, FORM_COL.SLEEP - 1, settings.SLEEP),
-      bowel: getModeValue_(childData, FORM_COL.BOWEL - 1, settings.BOWEL),
-      medicineNight: getModeValue_(childData, FORM_COL.MEDICINE_NIGHT - 1, settings.MEDICINE_NIGHT),
-      medicineMorning: getModeValue_(childData, FORM_COL.MEDICINE_MORNING - 1, settings.MEDICINE_MORNING),
-      notes: pickRandomNote_(childName, childData, formResponses),
-    };
-  }
+  var hasChildData = childData.length > 0;
 
   return {
     staffName: staffName,
     staffName2: staffName2,
-    checkIn: settings.CHECK_IN,
-    checkOut: settings.CHECK_OUT,
-    temperature: settings.TEMPERATURE,
-    mealDinner: settings.MEAL_DINNER,
-    mealBreakfast: settings.MEAL_BREAKFAST,
-    mealLunch: settings.MEAL_LUNCH,
-    bath: settings.BATH,
-    sleep: settings.SLEEP,
-    bowel: settings.BOWEL,
-    medicineNight: settings.MEDICINE_NIGHT,
-    medicineMorning: settings.MEDICINE_MORNING,
-    notes: pickRandomNote_(childName, [], formResponses),
+    // 入所/退所時刻は固定運用：最頻値、なければ設定値
+    checkIn: hasChildData ? getModeValue_(childData, FORM_COL.CHECK_IN - 1, settings.CHECK_IN) : settings.CHECK_IN,
+    checkOut: hasChildData ? getModeValue_(childData, FORM_COL.CHECK_OUT - 1, settings.CHECK_OUT) : settings.CHECK_OUT,
+    // 昼食は固定運用：最頻値、なければ設定値（通常 "-"）
+    mealLunch: hasChildData ? getModeValue_(childData, FORM_COL.MEAL_LUNCH - 1, settings.MEAL_LUNCH) : settings.MEAL_LUNCH,
+    // 行ごとランダム抽選するための候補プール（同児童 → 全児童 → 設定値の順でフォールバック）
+    temperaturePool: buildValuePool_(childData, formResponses, FORM_COL.TEMPERATURE - 1, settings.TEMPERATURE),
+    mealDinnerPool: buildValuePool_(childData, formResponses, FORM_COL.MEAL_DINNER - 1, settings.MEAL_DINNER),
+    mealBreakfastPool: buildValuePool_(childData, formResponses, FORM_COL.MEAL_BREAKFAST - 1, settings.MEAL_BREAKFAST),
+    bathPool: buildValuePool_(childData, formResponses, FORM_COL.BATH - 1, settings.BATH),
+    sleepPool: buildValuePool_(childData, formResponses, FORM_COL.SLEEP - 1, settings.SLEEP),
+    bowelPool: buildValuePool_(childData, formResponses, FORM_COL.BOWEL - 1, settings.BOWEL),
+    medicineNightPool: buildValuePool_(childData, formResponses, FORM_COL.MEDICINE_NIGHT - 1, settings.MEDICINE_NIGHT),
+    medicineMorningPool: buildValuePool_(childData, formResponses, FORM_COL.MEDICINE_MORNING - 1, settings.MEDICINE_MORNING),
   };
+}
+
+/**
+ * 抽選候補プールを構築する
+ * 優先順: 同児童データ > 全件データ > 設定値1件
+ * 出現回数の重みはそのまま（よく出る値が選ばれやすい）
+ */
+function buildValuePool_(childData, allData, colIndex, defaultValue) {
+  var collect = function(rows) {
+    return rows
+      .map(function(row) { return row[colIndex]; })
+      .filter(function(v) { return v !== '' && v !== null && v !== undefined; });
+  };
+  var pool = collect(childData);
+  if (pool.length > 0) return pool;
+  pool = collect(allData);
+  if (pool.length > 0) return pool;
+  return [defaultValue];
+}
+
+/**
+ * 配列からランダムに1要素を返す
+ */
+function pickRandomFromPool_(pool) {
+  if (!pool || pool.length === 0) return '';
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /**
@@ -623,62 +639,17 @@ function getModeValue_(data, colIndex, defaultValue) {
 }
 
 /**
- * 数値列の最頻値を返す（小数1桁に丸めて集計）
- * @param {Array<Array>} data データ配列
- * @param {number} colIndex 列インデックス（0始まり）
- * @param {number} defaultValue デフォルト値
- * @returns {number} 最頻値
- */
-function getModeNumeric_(data, colIndex, defaultValue) {
-  var counts = {};
-  data.forEach(function(row) {
-    var val = row[colIndex];
-    if (val === '' || val === null || val === undefined || isNaN(val)) return;
-    // 小数1桁に丸めてキーにする
-    var key = (Math.round(val * 10) / 10).toFixed(1);
-    counts[key] = (counts[key] || 0) + 1;
-  });
-
-  var maxCount = 0;
-  var modeKey = null;
-  Object.keys(counts).forEach(function(key) {
-    if (counts[key] > maxCount) {
-      maxCount = counts[key];
-      modeKey = key;
-    }
-  });
-
-  return modeKey !== null ? parseFloat(modeKey) : defaultValue;
-}
-
-/**
- * 連絡事項をランダムに選択する
- * 優先順: 自児童のノート → 全児童のノート → デフォルト
- * @param {string} childName 児童名
- * @param {Array<Array>} childData 自児童の実データ
- * @param {Array<Array>} allData 全児童の実データ
+ * 連絡事項を定型文マスタからランダムに選択する
+ * 振り分け行は実データを参照せず、定型文マスタのみを参照する
  * @returns {string} 連絡事項テキスト
  */
-function pickRandomNote_(childName, childData, allData) {
-  // 自児童のノートを収集（空でないもの）
-  var childNotes = collectNotes_(childData);
-  if (childNotes.length > 0) {
-    return childNotes[Math.floor(Math.random() * childNotes.length)];
-  }
-
-  // 他児童のノートを収集
-  var allNotes = collectNotes_(allData);
-  if (allNotes.length > 0) {
-    return allNotes[Math.floor(Math.random() * allNotes.length)];
-  }
-
-  // 定型文マスタからランダム取得
+function pickRandomNote_() {
   var masterNotes = getNotesMasterData_();
   if (masterNotes.length > 0) {
     return masterNotes[Math.floor(Math.random() * masterNotes.length)];
   }
 
-  // 設定シートの「連絡事項」値にフォールバック
+  // 定型文マスタが空の場合は設定シート値→デフォルトにフォールバック
   var settingNote = getSettingValue_(SETTINGS_ROW.NOTES);
   return settingNote ? String(settingNote) : ALLOCATION_DEFAULTS.NOTES;
 }
@@ -770,22 +741,6 @@ function fillStaff2ForFullDays_(year, month) {
 
   sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, colCount).setValues(data);
   Logger.log('スタッフ2補完完了: ' + year + '年' + month + '月（' + maxVisitsPerDay + '人満枠日対象）');
-}
-
-/**
- * データ配列から空でない連絡事項を収集する
- * @param {Array<Array>} data データ配列
- * @returns {Array<string>} ノートの配列
- */
-function collectNotes_(data) {
-  var notes = [];
-  data.forEach(function(row) {
-    var note = row[FORM_COL.NOTES - 1];
-    if (note && String(note).trim() !== '') {
-      notes.push(String(note).trim());
-    }
-  });
-  return notes;
 }
 
 /**

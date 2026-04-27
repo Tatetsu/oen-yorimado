@@ -120,7 +120,7 @@ function buildVisitMapFromConfirmed_(year, month) {
   var map = {};
   if (lastRow < CONFIRMED_DATA_START_ROW) return map;
 
-  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.DATA_TYPE).getValues();
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.CHILD_NAME).getValues();
   data.forEach(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
     if (recordDate.getFullYear() !== year || (recordDate.getMonth() + 1) !== month) return;
@@ -452,7 +452,7 @@ function buildVisitMapFromConfirmedYear_(year) {
 
   if (lastRow < CONFIRMED_DATA_START_ROW) return map;
 
-  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.DATA_TYPE).getValues();
+  var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, lastRow - CONFIRMED_DATA_START_ROW + 1, CONFIRMED_COL.CHILD_NAME).getValues();
 
   data.forEach(function(row) {
     var recordDate = new Date(row[CONFIRMED_COL.RECORD_DATE - 1]);
