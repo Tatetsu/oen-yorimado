@@ -133,7 +133,7 @@ function setupConfirmedVisitsSheet_(ss) {
 
   // ヘッダー行（3行目）- CONFIRMED_COL と完全一致させる
   // 8〜9列目「往」「復」は記録日が入所日/退所予定日と一致するときに 1 が立つ集計用列
-  // 21列目「宿泊PK」は児童名+入所日時のユニークキーで、デフォルト非表示
+  // 21列目「宿泊PK」は児童名+入所日（yyyy-MM-dd）のユニークキーで、デフォルト非表示
   var headers = ['データ区分', '記録日', 'スタッフ1', 'スタッフ2', '児童名', '入所日時', '退所予定日時', '往', '復', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項', '連泊', '宿泊PK'];
   var headerRange = sheet.getRange(CONFIRMED_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers]);

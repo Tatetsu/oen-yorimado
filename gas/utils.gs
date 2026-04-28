@@ -161,7 +161,7 @@ const DAY_OF_WEEK_MAP = {
 // CHECK_OUT の直後に PICKUP_OUTBOUND/PICKUP_RETURN（送迎の往/復）が入る
 //   → 月別の単純合計で送迎加算カウントが取れる（月またぎ・連泊にも対応）
 // OVERNIGHT_FLAG: 連泊フラグ（入所日と退所日が異なる行で true）
-// STAY_PK: 宿泊単位のユニークキー（児童名|入所日時ISO）。最終列・既定で非表示。
+// STAY_PK: 宿泊単位のユニークキー（児童名|入所日 yyyy-MM-dd）。最終列・既定で非表示。
 const CONFIRMED_COL = {
   DATA_TYPE: 1,
   RECORD_DATE: 2,
@@ -183,7 +183,7 @@ const CONFIRMED_COL = {
   MEDICINE_MORNING: 18,    // 服薬(朝)
   NOTES: 19,
   OVERNIGHT_FLAG: 20,      // 連泊フラグ（true/false）
-  STAY_PK: 21,             // 宿泊PK（児童名|入所日時ISO）
+  STAY_PK: 21,             // 宿泊PK（児童名|入所日 yyyy-MM-dd）
 };
 
 // メール件名のデフォルト値（設定シート未設定時のフォールバック）
@@ -387,7 +387,7 @@ function getActiveChildren() {
 /**
  * フォームの回答から指定年のデータを取得する
  * 入所日時〜退所日時の滞在期間が対象年と重なるレコードも返す（年またぎ連泊対応）
- * 児童名+入所日時でペアリングした論理1宿泊が対象年と重なる場合に構成全レコードを返す。
+ * 児童名+入所日（yyyy-MM-dd）でペアリングした論理1宿泊が対象年と重なる場合に構成全レコードを返す。
  * @param {number} year 年
  * @returns {Array<Array>} 該当年のフォーム回答データ
  */
@@ -819,11 +819,13 @@ function expandStayToDates_(recordDate, checkIn, checkOut) {
 }
 
 /**
- * フォーム回答を「児童名+入所日時」のユニークキーで論理1宿泊にペアリングする
+ * フォーム回答を「児童名+入所日」のユニークキーで論理1宿泊にペアリングする
  *
  * 新仕様（ユニーク宿泊キー方式）:
  *   - 全レコードに入所日時・退所日時を記入する運用
- *   - 児童名+入所日時が同じレコードは同一宿泊（中日の様子記録は同じ入退所を共有）
+ *   - 児童名+入所日（日付のみ）が同じレコードは同一宿泊（中日の様子記録は同じ入退所を共有）
+ *   - 同一児童が同日に2回別々の来館をすることは無い運用前提
+ *   - 連泊は1夜ごとに別レコードのため入所日が日ごとに異なりPK衝突しない
  *   - 状態機械によるペアリングは不要
  *   - プライマリ行 = 記録日と入所日が一致する行（無ければグループ内で記録日が最も早い行）
  *
@@ -951,16 +953,18 @@ function pairOvernightRecords_(formResponses) {
 
 /**
  * 宿泊PK文字列を生成する
- * 形式: "<児童名>|<入所日時ISO>"（例: "aさん|2026-04-30T21:00:00"）
- * 入所日時はタイムゾーン依存を避けるためスクリプトTZでフォーマット
+ * 形式: "<児童名>|<入所日>"（例: "aさん|2026-04-30"）
+ * 同一児童が同日に2回別々に来館することは無い運用前提。
+ * 連泊は1夜ごとに別レコード（入所日が日ごとに異なる）のためPK衝突しない。
+ * 日付はタイムゾーン依存を避けるためスクリプトTZでフォーマット
  * @param {string} childName 児童名
  * @param {Date} checkIn 入所日時
  * @returns {string} 宿泊PK
  */
 function buildStayPk_(childName, checkIn) {
   if (!childName || !(checkIn instanceof Date) || isNaN(checkIn.getTime())) return '';
-  var iso = Utilities.formatDate(checkIn, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
-  return String(childName) + '|' + iso;
+  var dateStr = Utilities.formatDate(checkIn, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return String(childName) + '|' + dateStr;
 }
 
 /**

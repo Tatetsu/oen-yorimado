@@ -38,7 +38,7 @@
 
 ### カウント方法
 
-`countVisitsByScope_` → `pairStayRecords_` で「児童名+入所日時」の宿泊単位にまとめ、`expandStayToDates_(checkIn, checkOut)` で連泊を日ごとに展開する。
+`countVisitsByScope_` → `pairStayRecords_` で「児童名+入所日（yyyy-MM-dd）」の宿泊単位にまとめ、`expandStayToDates_(checkIn, checkOut)` で連泊を日ごとに展開する。
 展開後の各日付が `matchesScope_` を通過した分のみカウントする。
 
 ```
