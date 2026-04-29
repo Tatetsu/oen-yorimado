@@ -4,7 +4,14 @@
  * データシート: 重度支援加算
  * ビューシート: 重度支援加算ビュー
  *
- * CSV列: 日付(0), 受給者証番号(1), 児童名(2), 時刻列(3〜)
+ * シート列構成（想定例・ヘッダー名駆動で動的に対応）:
+ *   0:記録日 / 1:受給者証番号 / 2:児童名 / 3〜:入所日(or 入所日時)・入所時刻・退所日・退所時刻・各時刻の○×・睡眠
+ *
+ * 列の型判別はヘッダー文字列で動的に行う:
+ *   - "日時" を含む  → 日時として表示（YYYY/MM/DD HH:mm）
+ *   - "入所日"/"退所日"/"日付" → 日付として表示（YYYY/MM/DD）
+ *   - "時刻"/"時間"を含む       → 時刻として表示（HH:mm）
+ *   - それ以外（17:00 等の Date ヘッダー含む） → 値そのまま（○/×等）
  */
 
 var SHEET_JUDO = "重度支援加算";
@@ -55,7 +62,14 @@ function setupJudoView_() {
     }
     setTableHeader_(view, 7, displayHeaders);
     view.setColumnWidth(1, 110);
-    for (var c = 2; c <= displayHeaders.length; c++) view.setColumnWidth(c, 50);
+    for (var c = 2; c <= displayHeaders.length; c++) {
+      var headerVal = sheetHeaders[c + 1];
+      var hStr = (headerVal instanceof Date) ? "" : String(headerVal);
+      if (hStr.indexOf("日時") >= 0) view.setColumnWidth(c, 130);
+      else if (hStr === "入所日" || hStr === "退所日" || hStr.indexOf("日付") >= 0) view.setColumnWidth(c, 100);
+      else if (hStr === "その他連絡事項" || hStr.indexOf("備考") >= 0) view.setColumnWidth(c, 200);
+      else view.setColumnWidth(c, 50);
+    }
   }
 
   updateJudoView();
@@ -86,6 +100,8 @@ function updateJudoView() {
     return;
   }
 
+  var sheetHeaders = allData[0];
+
   var filtered = [];
   for (var i = 1; i < allData.length; i++) {
     var row = allData[i];
@@ -101,15 +117,37 @@ function updateJudoView() {
     return;
   }
 
-  var numCols = allData[0].length - 3;
+  var numCols = sheetHeaders.length - 3;
   var rows = filtered.map(function(row) {
     var r = [formatDate_(row[0])];
     for (var c = 3; c < row.length; c++) {
-      r.push(row[c] instanceof Date ? formatTime_(row[c]) : row[c]);
+      r.push(formatJudoCell_(sheetHeaders[c], row[c]));
     }
     return r;
   });
   view.getRange(8, 1, rows.length, numCols + 1).setValues(rows);
+}
+
+/** ヘッダーの文字列に応じてセル値の表示形式を決定 */
+function formatJudoCell_(headerVal, rowVal) {
+  if (rowVal === null || rowVal === undefined || rowVal === "") return "";
+
+  var headerStr = (headerVal instanceof Date) ? "" : String(headerVal);
+
+  if (headerStr.indexOf("日時") >= 0) {
+    return rowVal instanceof Date ? formatDateTime_(rowVal) : String(rowVal);
+  }
+  if (headerStr === "入所日" || headerStr === "退所日" || headerStr.indexOf("日付") >= 0) {
+    return rowVal instanceof Date ? formatDate_(rowVal) : String(rowVal);
+  }
+  if (headerStr.indexOf("時刻") >= 0 || headerStr.indexOf("時間") >= 0) {
+    return rowVal instanceof Date ? formatTime_(rowVal) : String(rowVal);
+  }
+  // 17:00 等の Date ヘッダー or 自由テキスト列
+  if (rowVal instanceof Date) {
+    return formatTime_(rowVal);
+  }
+  return rowVal;
 }
 
 // === デバッグ：データシートの実際の値を確認 ===
@@ -131,31 +169,12 @@ function debugData() {
       var dateVal = row1[0];
       var dateType = typeof dateVal;
       if (dateVal instanceof Date) dateType = "Date";
-      messages.push("  1行目: 日付=" + dateVal + " (型:" + dateType + ") / 児童名=" + row1[2]);
-      messages.push("  toYm結果=" + toYm_(dateVal));
-
-      var yms = {};
-      var names = {};
-      for (var i = 1; i < data.length; i++) {
-        yms[toYm_(data[i][0])] = true;
-        names[String(data[i][2]).trim()] = true;
-      }
-      messages.push("  年月一覧: " + Object.keys(yms).sort().join(", "));
-      messages.push("  児童名一覧: " + Object.keys(names).sort().join(", "));
+      messages.push("  ヘッダー: " + data[0].join(" | "));
+      messages.push("  1行目: " + row1.map(function(v) {
+        return v instanceof Date ? "Date(" + v.toISOString() + ")" : String(v);
+      }).join(" | "));
     }
   });
-
-  var viewSheet = ss.getSheetByName(VIEW_JISSEKI);
-  if (viewSheet) {
-    var b1val = viewSheet.getRange("B1").getValue();
-    var b1disp = viewSheet.getRange("B1").getDisplayValue();
-    var b2val = viewSheet.getRange("B2").getValue();
-    var b2disp = viewSheet.getRange("B2").getDisplayValue();
-    messages.push("\n実績報告書ビュー:");
-    messages.push("  B1: getValue=" + b1val + " (型:" + (typeof b1val) + ") / getDisplayValue=" + b1disp);
-    messages.push("  B2: getValue=" + b2val + " (型:" + (typeof b2val) + (b2val instanceof Date ? "/Date" : "") + ") / getDisplayValue=" + b2disp);
-    messages.push("  parseYmLabel結果=" + parseYmLabel_(String(b2val)));
-  }
 
   SpreadsheetApp.getUi().alert(messages.join("\n"));
 }

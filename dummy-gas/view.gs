@@ -216,6 +216,42 @@ function getFilteredData_(sheetName, childName, yearMonth) {
   return filtered;
 }
 
+/** Date or String → "YYYY/MM/DD HH:mm" */
+function formatDateTime_(val) {
+  if (val instanceof Date) {
+    var y = val.getFullYear();
+    var m = ("0" + (val.getMonth() + 1)).slice(-2);
+    var d = ("0" + val.getDate()).slice(-2);
+    var h = ("0" + val.getHours()).slice(-2);
+    var mi = ("0" + val.getMinutes()).slice(-2);
+    return y + "/" + m + "/" + d + " " + h + ":" + mi;
+  }
+  return String(val);
+}
+
+/** 入所日〜退所日（時刻無視・両端含む）の Date 配列を生成 */
+function expandStayDates_(checkIn, checkOut) {
+  var result = [];
+  if (!(checkIn instanceof Date) || !(checkOut instanceof Date)) return result;
+  var cur = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+  var end = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
+  while (cur.getTime() <= end.getTime()) {
+    result.push(new Date(cur.getTime()));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return result;
+}
+
+/** Date オブジェクトを年・月フィルタで照合 */
+function matchYearMonthByDate_(date, filterYear, filterMonth) {
+  if (!(date instanceof Date)) return false;
+  var y = String(date.getFullYear());
+  var m = date.getMonth() + 1;
+  var yearOk = (!filterYear || filterYear === "すべて" || filterYear === y);
+  var monthOk = (!filterMonth || filterMonth === "すべて" || parseInt(filterMonth, 10) === m);
+  return yearOk && monthOk;
+}
+
 /** 児童名のみでフィルタ（全期間） */
 function getAllFilteredData_(sheetName, childName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
