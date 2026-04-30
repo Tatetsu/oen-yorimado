@@ -148,10 +148,15 @@ function getFormResponsesWeb(token, mode, year, month) {
 
   var tz = Session.getScriptTimeZone();
   var allData = sheet.getDataRange().getValues();
+  // 入眠時刻 / 起床時刻 はセル書式が H:mm の場合 getValues() が Date を返し、
+  // 1899年の Asia/Tokyo を JS V8 が LMT 相当で解釈して数十分のズレを生じる。
+  // フォーム送信値（10分刻みの文字列）がシート上で見えている表示値をそのまま使うため getDisplayValues() を併用する。
+  var allDisplay = sheet.getDataRange().getDisplayValues();
   var result = [];
 
   for (var i = FORM_DATA_START_ROW - 1; i < allData.length; i++) {
     var row = allData[i];
+    var displayRow = allDisplay[i];
     var d = getRowRecordDate_(row);
     if (!d) continue;
 
@@ -184,9 +189,9 @@ function getFormResponsesWeb(token, mode, year, month) {
       mealBreakfast: String(row[FORM_COL.MEAL_BREAKFAST - 1] || ''),
       mealLunch: String(row[FORM_COL.MEAL_LUNCH - 1] || ''),
       bath: String(row[FORM_COL.BATH - 1] || ''),
-      sleepOnset: String(row[FORM_COL.SLEEP_ONSET - 1] || ''),
+      sleepOnset: String(displayRow[FORM_COL.SLEEP_ONSET - 1] || ''),
       sleepCheck4am: String(row[FORM_COL.SLEEP_CHECK_4AM - 1] || ''),
-      wakeUp: String(row[FORM_COL.WAKE_UP - 1] || ''),
+      wakeUp: String(displayRow[FORM_COL.WAKE_UP - 1] || ''),
       bowel: String(row[FORM_COL.BOWEL - 1] || ''),
       medicineNight: String(row[FORM_COL.MEDICINE_NIGHT - 1] || ''),
       medicineMorning: String(row[FORM_COL.MEDICINE_MORNING - 1] || ''),
