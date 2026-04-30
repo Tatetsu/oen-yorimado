@@ -133,15 +133,15 @@ function setupConfirmedVisitsSheet_(ss) {
 
   // ヘッダー行（3行目）- CONFIRMED_COL と完全一致させる
   // 8〜9列目「往」「復」は記録日が入所日/退所予定日と一致するときに 1 が立つ集計用列
-  // 21列目「宿泊PK」は児童名+入所日（yyyy-MM-dd）のユニークキーで、デフォルト非表示
-  var headers = ['データ区分', '記録日', 'スタッフ1', 'スタッフ2', '児童名', '入所日時', '退所予定日時', '往', '復', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項', '連泊', '宿泊PK'];
+  // 23列目「宿泊PK」は児童名+入所日（yyyy-MM-dd）のユニークキーで、デフォルト非表示
+  var headers = ['データ区分', '利用日', 'スタッフ1', 'スタッフ2', '児童名', '入所日時', '退所予定日時', '往', '復', '体温', '夕食', '朝食', '昼食', '入浴', '入眠時刻', '朝4時チェック', '起床時刻', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項', '連泊', '宿泊PK'];
   var headerRange = sheet.getRange(CONFIRMED_HEADER_ROW, 1, 1, headers.length);
   headerRange.setValues([headers]);
   if (pristine) {
     styleSheetHeader_(headerRange, CONFIRMED_HEADER_ROW);
     setColumnWidths_(sheet, {
       1: 80,   // データ区分
-      2: 100,  // 記録日
+      2: 100,  // 利用日
       3: 100,  // スタッフ1
       4: 100,  // スタッフ2
       5: 100,  // 児童名
@@ -154,13 +154,15 @@ function setupConfirmedVisitsSheet_(ss) {
       12: 50,  // 朝食
       13: 50,  // 昼食
       14: 50,  // 入浴
-      15: 50,  // 睡眠
-      16: 50,  // 便
-      17: 60,  // 服薬(夜)
-      18: 60,  // 服薬(朝)
-      19: 200, // その他連絡事項
-      20: 60,  // 連泊
-      21: 200, // 宿泊PK
+      15: 70,  // 入眠時刻
+      16: 130, // 朝4時チェック
+      17: 70,  // 起床時刻
+      18: 50,  // 便
+      19: 60,  // 服薬(夜)
+      20: 60,  // 服薬(朝)
+      21: 200, // その他連絡事項
+      22: 60,  // 連泊
+      23: 200, // 宿泊PK
     });
   }
 
@@ -239,7 +241,7 @@ function setupChildViewSheet_(ss) {
   sheet.getRange('A8').setValue('来館回数 / 残枠 / 利用率:');
 
   // 来館履歴ヘッダー（9行目）- child-view.gs の履歴出力と一致させる
-  var historyHeaders = ['記録日', 'スタッフ名', '入所時間', '退所時間', '往', '復', '体温', '夕食', '朝食', '昼食', '入浴', '睡眠', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項'];
+  var historyHeaders = ['利用日', 'スタッフ名', '入所時間', '退所時間', '往', '復', '体温', '夕食', '朝食', '昼食', '入浴', '入眠時刻', '朝4時チェック', '起床時刻', '便', '服薬(夜)', '服薬(朝)', 'その他連絡事項'];
   sheet.getRange(9, 1, 1, historyHeaders.length).setValues([historyHeaders]);
 
   if (pristine) {
@@ -256,7 +258,7 @@ function setupChildViewSheet_(ss) {
 
     // 列幅調整（A4横向き 約1050px に収まるよう最適化）
     setColumnWidths_(sheet, {
-      1: 85,   // 記録日
+      1: 85,   // 利用日
       2: 85,   // スタッフ名
       3: 60,   // 入所時間
       4: 60,   // 退所時間
@@ -267,15 +269,17 @@ function setupChildViewSheet_(ss) {
       9: 40,   // 朝食
       10: 40,  // 昼食
       11: 40,  // 入浴
-      12: 40,  // 睡眠
-      13: 40,  // 便
-      14: 55,  // 服薬(夜)
-      15: 55,  // 服薬(朝)
-      16: 140, // その他連絡事項
+      12: 60,  // 入眠時刻
+      13: 110, // 朝4時チェック
+      14: 60,  // 起床時刻
+      15: 40,  // 便
+      16: 55,  // 服薬(夜)
+      17: 55,  // 服薬(朝)
+      18: 140, // その他連絡事項
     });
 
     // フォントサイズを印刷向けに統一
-    sheet.getRange('A1:P100').setFontSize(10);
+    sheet.getRange('A1:R100').setFontSize(10);
   }
 
   Logger.log('児童別ビューシートのセットアップ完了');
@@ -351,7 +355,9 @@ function setupSettingsSheet_(ss) {
     { row: SETTINGS_ROW.MEAL_BREAKFAST,      label: '朝食',         value: ALLOCATION_DEFAULTS.MEAL_BREAKFAST, note: '' },
     { row: SETTINGS_ROW.MEAL_LUNCH,          label: '昼食',         value: ALLOCATION_DEFAULTS.MEAL_LUNCH,   note: '他サービス併給時は − 推奨' },
     { row: SETTINGS_ROW.BATH,                label: '入浴',         value: ALLOCATION_DEFAULTS.BATH,         note: '' },
-    { row: SETTINGS_ROW.SLEEP,               label: '睡眠',         value: ALLOCATION_DEFAULTS.SLEEP,        note: '' },
+    { row: SETTINGS_ROW.SLEEP_ONSET,         label: '入眠時刻',     value: ALLOCATION_DEFAULTS.SLEEP_ONSET,  note: '20:30〜22:00（10分刻み）' },
+    { row: SETTINGS_ROW.SLEEP_CHECK_4AM,     label: '朝4時チェック', value: ALLOCATION_DEFAULTS.SLEEP_CHECK_4AM, note: '睡眠 / 覚醒確認後に付き添い' },
+    { row: SETTINGS_ROW.WAKE_UP,             label: '起床時刻',     value: ALLOCATION_DEFAULTS.WAKE_UP,      note: '6:00〜7:30（10分刻み）' },
     { row: SETTINGS_ROW.BOWEL,               label: '便',           value: ALLOCATION_DEFAULTS.BOWEL,        note: '' },
     { row: SETTINGS_ROW.MEDICINE_MORNING,    label: '服薬（朝）',   value: ALLOCATION_DEFAULTS.MEDICINE_MORNING, note: '' },
     { row: SETTINGS_ROW.MEDICINE_NIGHT,      label: '服薬（夜）',   value: ALLOCATION_DEFAULTS.MEDICINE_NIGHT,   note: '' },
@@ -359,7 +365,7 @@ function setupSettingsSheet_(ss) {
     { row: SETTINGS_ROW.DUMMY_STAFF_NAME,    label: '固定スタッフ', value: '溝口照代',                       note: '振り分け・スタッフ2補完用（7人満枠日に補完）' },
     { row: SETTINGS_ROW.ERROR_EMAIL,         label: 'エラー通知先メール', value: '',                         note: '複数はカンマ区切り' },
     { row: SETTINGS_ROW.EMAIL_SUBJECT,       label: 'メール件名',   value: DEFAULT_EMAIL_SUBJECT,            note: '保護者向け来館報告メールの件名' },
-    { row: SETTINGS_ROW.EMAIL_BODY,          label: 'メール本文',   value: DEFAULT_EMAIL_TEMPLATE,           note: '{保護者名}{日付}{児童名}{入所時間}{退所時間}{体温}{夕食}{朝食}{昼食}{入浴}{睡眠}{便}{服薬(夜)}{服薬(朝)}{連絡事項} が置換される' },
+    { row: SETTINGS_ROW.EMAIL_BODY,          label: 'メール本文',   value: DEFAULT_EMAIL_TEMPLATE,           note: '{保護者名}{日付}{児童名}{入所時間}{退所時間}{体温}{夕食}{朝食}{昼食}{入浴}{入眠時刻}{朝4時チェック}{起床時刻}{便}{服薬(夜)}{服薬(朝)}{連絡事項} が置換される' },
   ];
 
   // A列（項目名）は未記入行のみ書き込む。B列（値）は空の場合のみ初期値を書き込む。

@@ -322,7 +322,9 @@ function allocateRemainingPoints_(year, month) {
           mealBreakfast: randomGen.mealBreakfast(),
           mealLunch: randomGen.mealLunch(),
           bath: randomGen.bath(),
-          sleep: randomGen.sleep(),
+          sleepOnset: randomGen.sleepOnset(),
+          sleepCheck4am: randomGen.sleepCheck4am(),
+          wakeUp: randomGen.wakeUp(),
           bowel: randomGen.bowel(),
           medicineNight: randomGen.medicineNight(),
           medicineMorning: randomGen.medicineMorning(),
@@ -345,7 +347,9 @@ function allocateRemainingPoints_(year, month) {
             stayValues.mealBreakfast,
             stayValues.mealLunch,
             stayValues.bath,
-            stayValues.sleep,
+            stayValues.sleepOnset,
+            stayValues.sleepCheck4am,
+            stayValues.wakeUp,
             stayValues.bowel,
             stayValues.medicineNight,
             stayValues.medicineMorning,
@@ -465,7 +469,7 @@ function clearAllocationsForMonth_(year, month) {
   var lastRow = sheet.getLastRow();
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
-  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=21)
+  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=23)
   var rowCount = lastRow - CONFIRMED_DATA_START_ROW + 1;
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, rowCount, colCount).getValues();
 
@@ -495,7 +499,7 @@ function clearAllocationsForMonth_(year, month) {
  */
 function writeAllocationsToConfirmed_(results) {
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
-  var colCount = CONFIRMED_COL.STAY_PK; // 列の末尾=総数（STAY_PK=21）
+  var colCount = CONFIRMED_COL.STAY_PK; // 列の末尾=総数（STAY_PK=23）
 
   // 既存データと振り分け結果をマージして日付順にソートし直す
   var lastRow = sheet.getLastRow();
@@ -606,7 +610,7 @@ function toDateTimeOnDate_(date, timeVal) {
 
 /**
  * 児童の振り分け補完データを実データから算出する
- * 体温・食事(夕/朝)・入浴・睡眠・便・服薬は行ごとにランダム抽選するため、
+ * 体温・食事(夕/朝)・入浴・入眠時刻・朝4時チェック・起床時刻・便・服薬は行ごとにランダム抽選するため、
  * ここでは値そのものではなく抽選用の候補配列(プール)を返す
  * 同児童のフォーム回答にその列の値があれば優先、なければ全児童の回答から、
  * それでもなければ設定シート値1件をプールに入れる
@@ -643,7 +647,9 @@ function computeChildDefaults_(childName, masterRow, formResponses) {
     mealDinnerPool: buildValuePool_(childData, formResponses, FORM_COL.MEAL_DINNER - 1, settings.MEAL_DINNER),
     mealBreakfastPool: buildValuePool_(childData, formResponses, FORM_COL.MEAL_BREAKFAST - 1, settings.MEAL_BREAKFAST),
     bathPool: buildValuePool_(childData, formResponses, FORM_COL.BATH - 1, settings.BATH),
-    sleepPool: buildValuePool_(childData, formResponses, FORM_COL.SLEEP - 1, settings.SLEEP),
+    sleepOnsetPool: buildValuePool_(childData, formResponses, FORM_COL.SLEEP_ONSET - 1, settings.SLEEP_ONSET),
+    sleepCheck4amPool: buildValuePool_(childData, formResponses, FORM_COL.SLEEP_CHECK_4AM - 1, settings.SLEEP_CHECK_4AM),
+    wakeUpPool: buildValuePool_(childData, formResponses, FORM_COL.WAKE_UP - 1, settings.WAKE_UP),
     bowelPool: buildValuePool_(childData, formResponses, FORM_COL.BOWEL - 1, settings.BOWEL),
     medicineNightPool: buildValuePool_(childData, formResponses, FORM_COL.MEDICINE_NIGHT - 1, settings.MEDICINE_NIGHT),
     medicineMorningPool: buildValuePool_(childData, formResponses, FORM_COL.MEDICINE_MORNING - 1, settings.MEDICINE_MORNING),
@@ -766,7 +772,7 @@ function fillStaff2ForFullDays_(year, month) {
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
   var numRows = lastRow - CONFIRMED_DATA_START_ROW + 1;
-  var colCount = CONFIRMED_COL.STAY_PK; // 21
+  var colCount = CONFIRMED_COL.STAY_PK; // 23
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, colCount).getValues();
 
   // 対象月の行インデックスを収集。

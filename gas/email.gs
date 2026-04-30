@@ -6,13 +6,12 @@
  */
 
 /**
- * 前日の来館記録を保護者にメール送信する（自動トリガー用）
+ * 過去24時間以内に送信されたフォーム回答のうち、未送信の保護者宛メールを送る
+ * 自動トリガー（毎日AM8時）用。「タイムスタンプ ≧ now-24h」で対象抽出する。
  */
 function sendDailyVisitReports() {
   try {
-    var yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    sendVisitReportsByDate_(yesterday);
+    sendVisitReportsRecent_();
   } catch (error) {
     logError_('sendDailyVisitReports', error);
   }
@@ -139,7 +138,7 @@ function sendVisitReportsManual() {
 
 /**
  * HTMLダイアログから呼ばれる: 指定日の送信予定件数を集計する（送信は行わない）
- * 条件: 記録日 = 対象日 / タイムスタンプあり / メール送信済が空
+ * 条件: タイムスタンプの日付 = 対象日 / メール送信済が空
  * @param {string} dateStr yyyy-MM-dd形式の日付文字列
  * @returns {{date: string, sendable: number}}
  */
@@ -178,7 +177,7 @@ function sendVisitReportsByDateFromDialog(dateStr) {
 }
 
 /**
- * 指定日の来館記録を保護者にメール送信する
+ * 指定日の来館記録を保護者にメール送信する（手動ダイアログ用）
  * @param {Date} targetDate 対象日付
  * @returns {{date: string, sent: number, sendable: number, skipped: number, errors: number}} 処理結果
  */
@@ -193,6 +192,25 @@ function sendVisitReportsByDate_(targetDate) {
     Logger.log('対象日の来館記録がありません: ' + targetDateStr);
     return { date: targetDateStr, sent: 0, sendable: 0, skipped: 0, errors: 0 };
   }
+
+  var result = processEmailSend_(records, targetDate);
+  return {
+    date: targetDateStr,
+    sent: result.sent,
+    sendable: result.sendable,
+    skipped: result.skipped,
+    errors: result.errors,
+  };
+}
+
+/**
+ * フォーム回答レコード群を保護者宛メール送信する共通処理
+ * @param {Array<{rowIndex:number, data:Array}>} records
+ * @param {Date|null} fixedTargetDate 全件で使う対象日付。null の場合は各レコードのタイムスタンプ日付を使う。
+ * @returns {{sent:number, sendable:number, skipped:number, errors:number}}
+ */
+function processEmailSend_(records, fixedTargetDate) {
+  var tz = Session.getScriptTimeZone();
 
   // スタッフ用_回答シートへの参照（送信済フラグ書き込み用）
   var staffSs = SpreadsheetApp.openById(STAFF_SHEET_ID);
@@ -263,7 +281,9 @@ function sendVisitReportsByDate_(targetDate) {
       var ts2 = record[FORM_COL.TIMESTAMP - 1];
       var stayKey = (ts2 instanceof Date ? ts2.getTime() : String(ts2)) + '|' + childName;
       var pairedStay = stayByTimestamp[stayKey] || null;
-      var emailData = buildEmailData_(record, masterRow, targetDate, facilityName, pairedStay);
+      // メール本文の対象日: 引数で固定日が指定されていればそれを、無ければレコードの利用日を使う
+      var perRecordTargetDate = fixedTargetDate || getRowRecordDate_(record) || (ts2 instanceof Date ? new Date(ts2.getFullYear(), ts2.getMonth(), ts2.getDate()) : new Date());
+      var emailData = buildEmailData_(record, masterRow, perRecordTargetDate, facilityName, pairedStay);
       MailApp.sendEmail({
         to: String(parentEmail).trim(),
         subject: emailData.subject,
@@ -285,7 +305,6 @@ function sendVisitReportsByDate_(targetDate) {
 
   Logger.log('来館報告メール送信完了: 送信=' + sentCount + '件, スキップ=' + skipCount + '件, エラー=' + errorCount + '件');
   return {
-    date: targetDateStr,
     sent: sentCount,
     sendable: sendableCount,
     skipped: skipCount,
@@ -295,7 +314,7 @@ function sendVisitReportsByDate_(targetDate) {
 
 /**
  * フォームの回答から指定日のデータを取得する（行番号付き）
- * 「記録日」基準でフィルタする（B-1: 連泊中も各記録日に1通ずつ毎朝送信）
+ * フォームから「記録日」項目を廃止したため、タイムスタンプの日付を基準にフィルタする。
  * @param {Date} targetDate 対象日付
  * @returns {Array<{rowIndex: number, data: Array}>} 該当日のフォーム回答データ（rowIndexはシート上の行番号、1始まり）
  */
@@ -308,15 +327,63 @@ function getFormResponsesByDate_(targetDate) {
 
   var results = [];
   for (var i = 0; i < responses.length; i++) {
-    var recordDate = responses[i][FORM_COL.RECORD_DATE - 1];
-    if (!isValidDate_(recordDate)) continue;
-    var dateStr = formatDateYMD_(recordDate, 'yyyy-MM-dd', tz);
+    var ts = responses[i][FORM_COL.TIMESTAMP - 1];
+    if (!isValidDate_(ts)) continue;
+    var dateStr = formatDateYMD_(ts, 'yyyy-MM-dd', tz);
     if (dateStr === targetStr) {
       results.push({
         rowIndex: i + 2,
         data: responses[i],
       });
     }
+  }
+  return results;
+}
+
+/**
+ * 過去24時間以内のフォーム回答のうち、メール未送信のものに保護者宛メールを送る
+ * - 抽出条件: タイムスタンプ ≧ now - 24時間 / メール送信済が空
+ * - 自動トリガー（毎日AM8時）から呼ばれる
+ * @returns {{from: string, sent: number, sendable: number, skipped: number, errors: number}}
+ */
+function sendVisitReportsRecent_() {
+  var tz = Session.getScriptTimeZone();
+  var now = new Date();
+  var since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  Logger.log('来館報告メール(過去24時間)送信開始: ' + formatDateYMD_(since, 'yyyy/MM/dd HH:mm', tz) + ' 〜 ' + formatDateYMD_(now, 'yyyy/MM/dd HH:mm', tz));
+
+  var records = getFormResponsesSince_(since);
+  if (records.length === 0) {
+    Logger.log('過去24時間に新規回答はありません');
+    return { from: formatDateYMD_(since, 'yyyy/MM/dd HH:mm', tz), sent: 0, sendable: 0, skipped: 0, errors: 0 };
+  }
+
+  var result = processEmailSend_(records, null /* targetDate: 各レコードのタイムスタンプ日付を本文に使う */);
+  return {
+    from: formatDateYMD_(since, 'yyyy/MM/dd HH:mm', tz),
+    sent: result.sent,
+    sendable: result.sendable,
+    skipped: result.skipped,
+    errors: result.errors,
+  };
+}
+
+/**
+ * フォーム回答シートからタイムスタンプが指定時刻以降のレコードを取得する
+ * @param {Date} since
+ * @returns {Array<{rowIndex: number, data: Array}>}
+ */
+function getFormResponsesSince_(since) {
+  var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
+  var data = sheet.getDataRange().getValues();
+  var responses = data.slice(1);
+  var results = [];
+  var sinceTime = since.getTime();
+  for (var i = 0; i < responses.length; i++) {
+    var ts = responses[i][FORM_COL.TIMESTAMP - 1];
+    if (!isValidDate_(ts)) continue;
+    if (ts.getTime() < sinceTime) continue;
+    results.push({ rowIndex: i + 2, data: responses[i] });
   }
   return results;
 }
@@ -357,7 +424,9 @@ function buildEmailData_(record, masterRow, targetDate, facilityName, pairedStay
     .replace(/{朝食}/g, record[FORM_COL.MEAL_BREAKFAST - 1] || '')
     .replace(/{昼食}/g, record[FORM_COL.MEAL_LUNCH - 1] || '')
     .replace(/{入浴}/g, record[FORM_COL.BATH - 1] || '')
-    .replace(/{睡眠}/g, record[FORM_COL.SLEEP - 1] || '')
+    .replace(/{入眠時刻}/g, record[FORM_COL.SLEEP_ONSET - 1] || '')
+    .replace(/{朝4時チェック}/g, record[FORM_COL.SLEEP_CHECK_4AM - 1] || '')
+    .replace(/{起床時刻}/g, record[FORM_COL.WAKE_UP - 1] || '')
     .replace(/{便}/g, record[FORM_COL.BOWEL - 1] || '')
     .replace(/{服薬\(夜\)}/g, record[FORM_COL.MEDICINE_NIGHT - 1] || '')
     .replace(/{服薬\(朝\)}/g, record[FORM_COL.MEDICINE_MORNING - 1] || '')

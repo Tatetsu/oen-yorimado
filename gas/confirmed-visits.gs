@@ -18,7 +18,7 @@ function updateConfirmedVisits(year, month) {
   }
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
   var filterByMonth = (month !== undefined && month !== null);
-  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=21)
+  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=23)
 
   // 既存データを全件取得
   var lastRow = sheet.getLastRow();
@@ -108,7 +108,9 @@ function updateConfirmedVisits(year, month) {
         primary[FORM_COL.MEAL_BREAKFAST - 1],     // 朝食
         primary[FORM_COL.MEAL_LUNCH - 1],         // 昼食
         primary[FORM_COL.BATH - 1],               // 入浴
-        primary[FORM_COL.SLEEP - 1],              // 睡眠
+        primary[FORM_COL.SLEEP_ONSET - 1],        // 入眠時刻
+        primary[FORM_COL.SLEEP_CHECK_4AM - 1],    // 朝4時チェック
+        primary[FORM_COL.WAKE_UP - 1],            // 起床時刻
         primary[FORM_COL.BOWEL - 1],              // 便
         primary[FORM_COL.MEDICINE_NIGHT - 1],     // 服薬(夜)
         primary[FORM_COL.MEDICINE_MORNING - 1],   // 服薬(朝)

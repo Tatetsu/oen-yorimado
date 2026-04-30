@@ -176,10 +176,6 @@
         <p class="section-label">基本情報</p>
         <div class="form-row">
           <div class="form-group">
-            <label>記録日 <span style="color:#ea4335">*</span></label>
-            <input type="date" id="f-recordDate">
-          </div>
-          <div class="form-group">
             <label>児童名 <span style="color:#ea4335">*</span></label>
             <select id="f-childName"></select>
           </div>
@@ -236,8 +232,29 @@
             <select id="f-bath"><option>○</option><option>×</option><option>△</option><option>-</option></select>
           </div>
           <div class="form-group">
-            <label>睡眠</label>
-            <select id="f-sleep"><option>○</option><option>×</option><option>△</option><option>-</option></select>
+            <label>入眠時刻 <span style="color:#d33">*</span></label>
+            <select id="f-sleep-onset" required>
+              <option value="">--</option>
+              <option>20:30</option><option>20:40</option><option>20:50</option>
+              <option>21:00</option><option>21:10</option><option>21:20</option><option>21:30</option><option>21:40</option><option>21:50</option>
+              <option>22:00</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>朝4時チェック <span style="color:#d33">*</span></label>
+            <select id="f-sleep-check-4am" required>
+              <option value="">--</option>
+              <option>睡眠</option>
+              <option>覚醒確認後に付き添い</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>起床時刻 <span style="color:#d33">*</span></label>
+            <select id="f-wake-up" required>
+              <option value="">--</option>
+              <option>6:00</option><option>6:10</option><option>6:20</option><option>6:30</option><option>6:40</option><option>6:50</option>
+              <option>7:00</option><option>7:10</option><option>7:20</option><option>7:30</option>
+            </select>
           </div>
           <div class="form-group">
             <label>便</label>
@@ -339,7 +356,7 @@
     });
   }
 
-  // 食事・入浴・睡眠・便・服薬 の <select> 選択肢をフォーム由来で上書き（取得失敗時はハードコード維持）
+  // 食事・入浴・睡眠3項目・便・服薬 の <select> 選択肢をフォーム由来で上書き（取得失敗時はハードコード維持）
   function populateFormChoices(formChoices) {
     if (!formChoices) return;
     var map = {
@@ -347,7 +364,9 @@
       mealBreakfast: 'f-meal-breakfast',
       mealLunch: 'f-meal-lunch',
       bath: 'f-bath',
-      sleep: 'f-sleep',
+      sleepOnset: 'f-sleep-onset',
+      sleepCheck4am: 'f-sleep-check-4am',
+      wakeUp: 'f-wake-up',
       bowel: 'f-bowel',
       medicineNight: 'f-medicine-night',
       medicineMorning: 'f-medicine-morning',
@@ -421,7 +440,9 @@
         + field('朝食', r.mealBreakfast)
         + field('昼食', r.mealLunch)
         + field('入浴', r.bath)
-        + field('睡眠', r.sleep)
+        + field('入眠時刻', r.sleepOnset)
+        + field('朝4時チェック', r.sleepCheck4am)
+        + field('起床時刻', r.wakeUp)
         + field('便', r.bowel)
         + field('服薬(夜)', r.medicineNight)
         + field('服薬(朝)', r.medicineMorning)
@@ -446,7 +467,6 @@
     var r = s.records[idx];
     s.editIdx = idx;
 
-    document.getElementById('f-recordDate').value = r.recordDateInput;
     setSelect('f-childName', r.childName);
     setInputOrSelectValue('f-staffName', r.staffName);
     setInputOrSelectValue('f-staffName2', r.staffName2);
@@ -457,7 +477,9 @@
     setSelectOrAdd('f-meal-breakfast', r.mealBreakfast);
     setSelectOrAdd('f-meal-lunch', r.mealLunch);
     setSelectOrAdd('f-bath', r.bath);
-    setSelectOrAdd('f-sleep', r.sleep);
+    setSelectOrAdd('f-sleep-onset', r.sleepOnset);
+    setSelectOrAdd('f-sleep-check-4am', r.sleepCheck4am);
+    setSelectOrAdd('f-wake-up', r.wakeUp);
     setSelectOrAdd('f-bowel', r.bowel);
     setSelectOrAdd('f-medicine-night', r.medicineNight);
     setSelectOrAdd('f-medicine-morning', r.medicineMorning);
@@ -480,11 +502,17 @@
       showToast('入所日時と退所予定日時はどちらも必須です。', 'error');
       return;
     }
+    var sleepOnsetVal = document.getElementById('f-sleep-onset').value;
+    var sleepCheck4amVal = document.getElementById('f-sleep-check-4am').value;
+    var wakeUpVal = document.getElementById('f-wake-up').value;
+    if (!sleepOnsetVal || !sleepCheck4amVal || !wakeUpVal) {
+      showToast('入眠時刻・朝4時チェック・起床時刻はすべて必須です。', 'error');
+      return;
+    }
     btn.disabled = true;
     btn.textContent = '保存中...';
 
     var data = {
-      recordDateInput: document.getElementById('f-recordDate').value,
       childName: document.getElementById('f-childName').value,
       staffName: document.getElementById('f-staffName').value,
       staffName2: document.getElementById('f-staffName2').value,
@@ -495,7 +523,9 @@
       mealBreakfast: document.getElementById('f-meal-breakfast').value,
       mealLunch: document.getElementById('f-meal-lunch').value,
       bath: document.getElementById('f-bath').value,
-      sleep: document.getElementById('f-sleep').value,
+      sleepOnset: document.getElementById('f-sleep-onset').value,
+      sleepCheck4am: document.getElementById('f-sleep-check-4am').value,
+      wakeUp: document.getElementById('f-wake-up').value,
       bowel: document.getElementById('f-bowel').value,
       medicineNight: document.getElementById('f-medicine-night').value,
       medicineMorning: document.getElementById('f-medicine-morning').value,
@@ -512,8 +542,6 @@
           closeEdit();
           showToast('修正しました。', 'success');
           var r = s.records[s.editIdx];
-          r.recordDateDisplay = data.recordDateInput.replace(/-/g, '/');
-          r.recordDateInput = data.recordDateInput;
           r.childName = data.childName;
           r.staffName = data.staffName;
           r.staffName2 = data.staffName2;
@@ -525,7 +553,11 @@
           r.mealDinner = data.mealDinner;
           r.mealBreakfast = data.mealBreakfast;
           r.mealLunch = data.mealLunch;
-          r.bath = data.bath; r.sleep = data.sleep; r.bowel = data.bowel;
+          r.bath = data.bath;
+          r.sleepOnset = data.sleepOnset;
+          r.sleepCheck4am = data.sleepCheck4am;
+          r.wakeUp = data.wakeUp;
+          r.bowel = data.bowel;
           r.medicineNight = data.medicineNight;
           r.medicineMorning = data.medicineMorning;
           r.notes = data.notes;

@@ -55,8 +55,8 @@ function getInitialDataWeb(token) {
     var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
     var data = sheet.getDataRange().getValues();
     data.slice(FORM_DATA_START_ROW - 1).forEach(function(row) {
-      var d = new Date(row[FORM_COL.RECORD_DATE - 1]);
-      if (isValidDate_(d)) years[d.getFullYear()] = true;
+      var d = getRowRecordDate_(row);
+      if (d) years[d.getFullYear()] = true;
       var name = String(row[FORM_COL.CHILD_NAME - 1] || '').trim();
       if (name) childNames[name] = true;
       var s1 = String(row[FORM_COL.STAFF_NAME - 1] || '').trim();
@@ -106,7 +106,9 @@ function getFormChoicesFromLinkedForm_() {
       '朝食': 'mealBreakfast',
       '昼食': 'mealLunch',
       '入浴': 'bath',
-      '睡眠': 'sleep',
+      '入眠時刻': 'sleepOnset',
+      '朝4時チェック': 'sleepCheck4am',
+      '起床時刻': 'wakeUp',
       '便': 'bowel',
       '服薬(夜)': 'medicineNight',
       '服薬（夜）': 'medicineNight',
@@ -150,10 +152,8 @@ function getFormResponsesWeb(token, mode, year, month) {
 
   for (var i = FORM_DATA_START_ROW - 1; i < allData.length; i++) {
     var row = allData[i];
-    var dateVal = row[FORM_COL.RECORD_DATE - 1];
-    if (!dateVal) continue;
-    var d = new Date(dateVal);
-    if (!isValidDate_(d)) continue;
+    var d = getRowRecordDate_(row);
+    if (!d) continue;
 
     var rowYear = d.getFullYear();
     var rowMonth = d.getMonth() + 1;
@@ -170,7 +170,6 @@ function getFormResponsesWeb(token, mode, year, month) {
       rowIndex: i + 1,
       timestamp: formatDtDisplay_(tsVal, tz),
       recordDateDisplay: formatDateYMD_(d, 'yyyy/MM/dd', tz),
-      recordDateInput: formatDateYMD_(d, 'yyyy-MM-dd', tz),
       childName: String(row[FORM_COL.CHILD_NAME - 1] || ''),
       staffName: String(row[FORM_COL.STAFF_NAME - 1] || ''),
       staffName2: String(row[FORM_COL.STAFF_NAME_2 - 1] || ''),
@@ -185,7 +184,9 @@ function getFormResponsesWeb(token, mode, year, month) {
       mealBreakfast: String(row[FORM_COL.MEAL_BREAKFAST - 1] || ''),
       mealLunch: String(row[FORM_COL.MEAL_LUNCH - 1] || ''),
       bath: String(row[FORM_COL.BATH - 1] || ''),
-      sleep: String(row[FORM_COL.SLEEP - 1] || ''),
+      sleepOnset: String(row[FORM_COL.SLEEP_ONSET - 1] || ''),
+      sleepCheck4am: String(row[FORM_COL.SLEEP_CHECK_4AM - 1] || ''),
+      wakeUp: String(row[FORM_COL.WAKE_UP - 1] || ''),
       bowel: String(row[FORM_COL.BOWEL - 1] || ''),
       medicineNight: String(row[FORM_COL.MEDICINE_NIGHT - 1] || ''),
       medicineMorning: String(row[FORM_COL.MEDICINE_MORNING - 1] || ''),
@@ -209,27 +210,18 @@ function formatDtInput_(val, tz) {
 
 /**
  * フォームの回答の1行を更新する
+ * 「記録日」列(2列目) はフォームから廃止済みのため書き換え対象外。
+ * STAFF_NAME(3列目)〜NOTES(19列目)の17列のみ更新する。
  */
 function updateFormResponseWeb(token, rowIndex, data) {
   try {
     requireValidToken_(token);
     var sheet = getSheet(SHEET_NAMES.FORM_RESPONSE);
 
-    var recordDate = new Date(data.recordDateInput);
     var checkIn = data.checkInInput ? new Date(data.checkInInput) : '';
     var checkOut = data.checkOutInput ? new Date(data.checkOutInput) : '';
 
-    // 新仕様: 入退所日が異なれば連泊扱いとして OVERNIGHT_FLAG に '連泊' を書き込む（後方互換用フラグ）
-    var overnightFlag = '';
-    if (checkIn instanceof Date && checkOut instanceof Date
-        && (checkIn.getFullYear() !== checkOut.getFullYear()
-            || checkIn.getMonth() !== checkOut.getMonth()
-            || checkIn.getDate() !== checkOut.getDate())) {
-      overnightFlag = '連泊';
-    }
-
     var values = [[
-      recordDate,
       data.staffName,
       data.staffName2 || '',
       data.childName,
@@ -240,18 +232,18 @@ function updateFormResponseWeb(token, rowIndex, data) {
       data.mealBreakfast || '',
       data.mealLunch || '',
       data.bath,
-      data.sleep,
+      data.sleepOnset || '',
+      data.sleepCheck4am || '',
+      data.wakeUp || '',
       data.bowel,
       data.medicineNight || '',
       data.medicineMorning || '',
       data.notes || '',
-      overnightFlag,
     ]];
 
-    // RECORD_DATE(col 2) から OVERNIGHT_FLAG(col 18) までの 17 列を書き込む
-    var writeWidth = FORM_COL.OVERNIGHT_FLAG - FORM_COL.RECORD_DATE + 1;
-    sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, writeWidth).setValues(values);
-    sheet.getRange(rowIndex, FORM_COL.RECORD_DATE, 1, 1).setNumberFormat('yyyy/mm/dd');
+    // STAFF_NAME(col 3) から NOTES(col 19) までの 17 列を書き込む
+    var writeWidth = FORM_COL.NOTES - FORM_COL.STAFF_NAME + 1;
+    sheet.getRange(rowIndex, FORM_COL.STAFF_NAME, 1, writeWidth).setValues(values);
     if (checkIn instanceof Date) {
       sheet.getRange(rowIndex, FORM_COL.CHECK_IN, 1, 2).setNumberFormat('yyyy/mm/dd H:mm');
     }

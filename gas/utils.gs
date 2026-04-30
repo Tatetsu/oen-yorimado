@@ -49,15 +49,17 @@ const SETTINGS_ROW = {
   MEAL_BREAKFAST: 8,      // 朝食
   MEAL_LUNCH: 9,          // 昼食
   BATH: 10,               // 入浴
-  SLEEP: 11,              // 睡眠
-  BOWEL: 12,              // 便
-  MEDICINE_MORNING: 13,   // 服薬（朝）
-  MEDICINE_NIGHT: 14,     // 服薬（夜）
-  NOTES: 15,              // 連絡事項
-  DUMMY_STAFF_NAME: 16,   // 固定スタッフ（振り分け・スタッフ2補完用）
-  ERROR_EMAIL: 17,        // エラー通知先メール（カンマ区切り）
-  EMAIL_SUBJECT: 18,      // メール件名
-  EMAIL_BODY: 19,         // メール本文
+  SLEEP_ONSET: 11,        // 入眠時刻
+  SLEEP_CHECK_4AM: 12,    // 朝4時チェック
+  WAKE_UP: 13,            // 起床時刻
+  BOWEL: 14,              // 便
+  MEDICINE_MORNING: 15,   // 服薬（朝）
+  MEDICINE_NIGHT: 16,     // 服薬（夜）
+  NOTES: 17,              // 連絡事項
+  DUMMY_STAFF_NAME: 18,   // 固定スタッフ（振り分け・スタッフ2補完用）
+  ERROR_EMAIL: 19,        // エラー通知先メール（カンマ区切り）
+  EMAIL_SUBJECT: 20,      // メール件名
+  EMAIL_BODY: 21,         // メール本文
 };
 
 // 児童マスタの列インデックス（1始まり）
@@ -85,11 +87,12 @@ const FORM_DATA_START_ROW = 2;
 // フォームの回答の列インデックス（1始まり）
 // 行政様式の実績記録票に合わせ、食事は夕/朝/昼、服薬は夜/朝に分離する
 // CHECK_OUT は「退所予定日時」として扱う（連泊初日・中日は空欄可）
-// OVERNIGHT_FLAG: 連泊フラグ（true=連泊、false/空欄=単泊）。その他連絡事項の直後（メール送信の直前）
-// 確定来館記録の列順と2列目以降が一致するレイアウト
+// 連泊フラグ列は廃止（入所日と退所予定日の差分で連泊判定する）
+// RECORD_DATE はフォームから廃止済み。新規データでは空欄になるため、
+// 取得時は getRowRecordDate_() で TIMESTAMP の日付にフォールバックして使う。
 const FORM_COL = {
   TIMESTAMP: 1,
-  RECORD_DATE: 2,
+  RECORD_DATE: 2,                // 旧「記録日」(フォームから削除済み・列は互換のため保持)
   STAFF_NAME: 3,           // スタッフ1
   STAFF_NAME_2: 4,         // スタッフ2(任意)
   CHILD_NAME: 5,
@@ -100,13 +103,14 @@ const FORM_COL = {
   MEAL_BREAKFAST: 10,      // 朝食
   MEAL_LUNCH: 11,          // 昼食
   BATH: 12,
-  SLEEP: 13,
-  BOWEL: 14,
-  MEDICINE_NIGHT: 15,      // 服薬(夜)
-  MEDICINE_MORNING: 16,    // 服薬(朝)
-  NOTES: 17,
-  OVERNIGHT_FLAG: 18,      // 連泊フラグ(true/false)
-  EMAIL_SENT: 19,          // メール送信済(システム管理・初回送信時に追加)
+  SLEEP_ONSET: 13,         // 入眠時刻
+  SLEEP_CHECK_4AM: 14,     // 朝4時チェック
+  WAKE_UP: 15,             // 起床時刻
+  BOWEL: 16,
+  MEDICINE_NIGHT: 17,      // 服薬(夜)
+  MEDICINE_MORNING: 18,    // 服薬(朝)
+  NOTES: 19,
+  EMAIL_SENT: 20,          // メール送信済(システム管理・初回送信時に追加)
 };
 
 // 月別集計の列インデックス（1始まり）
@@ -140,7 +144,9 @@ const ALLOCATION_DEFAULTS = {
   MEAL_BREAKFAST: '○',
   MEAL_LUNCH: '−',
   BATH: '○',
-  SLEEP: '○',
+  SLEEP_ONSET: '21:00',
+  SLEEP_CHECK_4AM: '睡眠',
+  WAKE_UP: '7:00',
   BOWEL: '○',
   MEDICINE_NIGHT: '○',
   MEDICINE_MORNING: '○',
@@ -177,13 +183,15 @@ const CONFIRMED_COL = {
   MEAL_BREAKFAST: 12,      // 朝食
   MEAL_LUNCH: 13,          // 昼食
   BATH: 14,
-  SLEEP: 15,
-  BOWEL: 16,
-  MEDICINE_NIGHT: 17,      // 服薬(夜)
-  MEDICINE_MORNING: 18,    // 服薬(朝)
-  NOTES: 19,
-  OVERNIGHT_FLAG: 20,      // 連泊フラグ（true/false）
-  STAY_PK: 21,             // 宿泊PK（児童名|入所日 yyyy-MM-dd）
+  SLEEP_ONSET: 15,         // 入眠時刻
+  SLEEP_CHECK_4AM: 16,     // 朝4時チェック
+  WAKE_UP: 17,             // 起床時刻
+  BOWEL: 18,
+  MEDICINE_NIGHT: 19,      // 服薬(夜)
+  MEDICINE_MORNING: 20,    // 服薬(朝)
+  NOTES: 21,
+  OVERNIGHT_FLAG: 22,      // 連泊フラグ（true/false）
+  STAY_PK: 23,             // 宿泊PK（児童名|入所日 yyyy-MM-dd）
 };
 
 // メール件名のデフォルト値（設定シート未設定時のフォールバック）
@@ -206,7 +214,9 @@ const DEFAULT_EMAIL_TEMPLATE = [
   '・朝食: {朝食}',
   '・昼食: {昼食}',
   '・入浴: {入浴}',
-  '・睡眠: {睡眠}',
+  '・入眠時刻: {入眠時刻}',
+  '・朝4時チェック: {朝4時チェック}',
+  '・起床時刻: {起床時刻}',
   '・便: {便}',
   '・服薬(夜): {服薬(夜)}',
   '・服薬(朝): {服薬(朝)}',
@@ -295,6 +305,34 @@ function setListValidation_(range, options, showDropdown) {
  */
 function isValidDate_(d) {
   return (d instanceof Date) && !isNaN(d.getTime());
+}
+
+/**
+ * フォーム回答1行から「利用日」(旧:記録日)を導出する
+ * - RECORD_DATE 列が有効ならその日付を返す（過去データ互換）
+ * - 空ならタイムスタンプの日付部分（送信日）を返す
+ * - 全て無効なら null
+ * 新仕様: フォームから「記録日」項目を廃止したため、新規データは TIMESTAMP 由来。
+ * @param {Array} row フォーム回答の1行
+ * @returns {Date|null}
+ */
+function getRowRecordDate_(row) {
+  if (!row) return null;
+  var raw = row[FORM_COL.RECORD_DATE - 1];
+  if (raw) {
+    var d = (raw instanceof Date) ? raw : new Date(raw);
+    if (isValidDate_(d) && d.getFullYear() >= 1900) {
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+  }
+  var ts = row[FORM_COL.TIMESTAMP - 1];
+  if (ts) {
+    var t = (ts instanceof Date) ? ts : new Date(ts);
+    if (isValidDate_(t)) {
+      return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    }
+  }
+  return null;
 }
 
 /**
@@ -524,8 +562,8 @@ function getTargetYearFromFormResponses_() {
     if (data.length <= 1) return new Date().getFullYear();
     var years = {};
     data.slice(1).forEach(function(row) {
-      var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
-      if (!isNaN(recordDate.getTime())) {
+      var recordDate = getRowRecordDate_(row);
+      if (recordDate) {
         var y = recordDate.getFullYear();
         years[y] = (years[y] || 0) + 1;
       }
@@ -549,8 +587,8 @@ function collectYearsFromFormResponses_() {
   if (data.length <= 1) return [new Date().getFullYear()];
   var yearsSet = {};
   data.slice(1).forEach(function(row) {
-    var d = new Date(row[FORM_COL.RECORD_DATE - 1]);
-    if (!isNaN(d.getTime())) yearsSet[d.getFullYear()] = true;
+    var d = getRowRecordDate_(row);
+    if (d) yearsSet[d.getFullYear()] = true;
   });
   var years = Object.keys(yearsSet).map(Number);
   if (years.length === 0) return [new Date().getFullYear()];
@@ -851,18 +889,18 @@ function pairStayRecords_(formResponses) {
 
     var checkIn = row[FORM_COL.CHECK_IN - 1];
     var checkOut = row[FORM_COL.CHECK_OUT - 1];
-    var recordDate = new Date(row[FORM_COL.RECORD_DATE - 1]);
+    var recordDate = getRowRecordDate_(row);
     var hasCheckIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
     var hasCheckOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
 
-    // 入所日時が無いレコードは記録日+タイムスタンプで独立した1宿泊として扱う（移行データ吸収用）
+    // 入所日時が無いレコードは利用日+タイムスタンプで独立した1宿泊として扱う（移行データ吸収用）
     var key;
     if (hasCheckIn) {
       key = buildStayPk_(name, checkIn);
     } else {
       var ts = row[FORM_COL.TIMESTAMP - 1];
       key = name + '|NOIN|' +
-        (recordDate instanceof Date ? recordDate.getTime() : String(recordDate)) + '|' +
+        (recordDate instanceof Date ? recordDate.getTime() : String(recordDate || '')) + '|' +
         (ts instanceof Date ? ts.getTime() : String(ts || ''));
     }
 
@@ -887,7 +925,7 @@ function pairStayRecords_(formResponses) {
   var stays = Object.keys(groups).map(function(key) {
     var g = groups[key];
     var primary = pickPrimaryRow_(g.sourceRows, g.checkIn);
-    var primaryRecordDate = new Date(primary[FORM_COL.RECORD_DATE - 1]);
+    var primaryRecordDate = getRowRecordDate_(primary);
     var isOvernight = false;
     if (g.checkIn && g.checkOut) {
       var inDay = new Date(g.checkIn.getFullYear(), g.checkIn.getMonth(), g.checkIn.getDate());
@@ -898,7 +936,7 @@ function pairStayRecords_(formResponses) {
       childName: g.childName,
       checkIn: g.checkIn,
       checkOut: g.checkOut,
-      recordDate: isValidDate_(primaryRecordDate) ? primaryRecordDate : g.recordDate,
+      recordDate: primaryRecordDate || g.recordDate,
       isOvernight: isOvernight,
       sourceRows: g.sourceRows,
       primaryRow: primary,
@@ -929,15 +967,15 @@ function pickPrimaryRow_(rows, checkIn) {
   if (checkIn instanceof Date) {
     var inKey = formatDateKey_(new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate()));
     for (var i = 0; i < rows.length; i++) {
-      var rd = new Date(rows[i][FORM_COL.RECORD_DATE - 1]);
-      if (isValidDate_(rd) && formatDateKey_(rd) === inKey) return rows[i];
+      var rd = getRowRecordDate_(rows[i]);
+      if (rd && formatDateKey_(rd) === inKey) return rows[i];
     }
   }
-  // 記録日昇順で先頭
+  // 利用日昇順で先頭
   var sorted = rows.slice().sort(function(a, b) {
-    var ra = new Date(a[FORM_COL.RECORD_DATE - 1]);
-    var rb = new Date(b[FORM_COL.RECORD_DATE - 1]);
-    return (ra.getTime() || 0) - (rb.getTime() || 0);
+    var ra = getRowRecordDate_(a);
+    var rb = getRowRecordDate_(b);
+    return ((ra && ra.getTime()) || 0) - ((rb && rb.getTime()) || 0);
   });
   return sorted[0];
 }
@@ -969,7 +1007,8 @@ function buildStayPk_(childName, checkIn) {
 
 /**
  * フォーム/確定来館記録の行が連泊扱いかを判定する
- * 新仕様: 入所日と退所日が異なる行を連泊とみなす（旧 OVERNIGHT_FLAG 列の値は補助として使用）
+ * 入所日と退所日が異なる行を連泊とみなす。
+ * 確定来館記録側のみ、旧 OVERNIGHT_FLAG 列の値を補助フォールバックとして使用する。
  * @param {Array} row フォーム回答 or 確定来館記録の1行
  * @param {boolean} [fromConfirmed=false] true=CONFIRMED_COL基準、false=FORM_COL基準
  * @returns {boolean}
@@ -984,9 +1023,9 @@ function isOvernightRow_(row, fromConfirmed) {
     var outDay = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
     if (inDay.getTime() !== outDay.getTime()) return true;
   }
-  // フォールバック: 旧 OVERNIGHT_FLAG 列の値（移行期データ向け）
-  var flagCol = fromConfirmed ? CONFIRMED_COL.OVERNIGHT_FLAG : FORM_COL.OVERNIGHT_FLAG;
-  var v = row[flagCol - 1];
+  if (!fromConfirmed) return false;
+  // フォールバック: 確定来館記録の旧 OVERNIGHT_FLAG 列の値（移行期データ向け）
+  var v = row[CONFIRMED_COL.OVERNIGHT_FLAG - 1];
   if (v === true) return true;
   if (v === false || v === '' || v == null) return false;
   var s = String(v).trim().toLowerCase();
@@ -1083,7 +1122,9 @@ function getAllocationDefaultsFromSettings_() {
     MEAL_BREAKFAST: pick(SETTINGS_ROW.MEAL_BREAKFAST, ALLOCATION_DEFAULTS.MEAL_BREAKFAST),
     MEAL_LUNCH: pick(SETTINGS_ROW.MEAL_LUNCH, ALLOCATION_DEFAULTS.MEAL_LUNCH),
     BATH: pick(SETTINGS_ROW.BATH, ALLOCATION_DEFAULTS.BATH),
-    SLEEP: pick(SETTINGS_ROW.SLEEP, ALLOCATION_DEFAULTS.SLEEP),
+    SLEEP_ONSET: pick(SETTINGS_ROW.SLEEP_ONSET, ALLOCATION_DEFAULTS.SLEEP_ONSET),
+    SLEEP_CHECK_4AM: pick(SETTINGS_ROW.SLEEP_CHECK_4AM, ALLOCATION_DEFAULTS.SLEEP_CHECK_4AM),
+    WAKE_UP: pick(SETTINGS_ROW.WAKE_UP, ALLOCATION_DEFAULTS.WAKE_UP),
     BOWEL: pick(SETTINGS_ROW.BOWEL, ALLOCATION_DEFAULTS.BOWEL),
     MEDICINE_NIGHT: pick(SETTINGS_ROW.MEDICINE_NIGHT, ALLOCATION_DEFAULTS.MEDICINE_NIGHT),
     MEDICINE_MORNING: pick(SETTINGS_ROW.MEDICINE_MORNING, ALLOCATION_DEFAULTS.MEDICINE_MORNING),
@@ -1238,6 +1279,37 @@ function getAllocationRandomGenerators_() {
     { value: '△', weight: 0.5 },
     { value: '-', weight: 0.5 },
   ];
+  // 入眠時刻 20:30〜22:00（10分刻み）。21:00 を中心に重み付け。
+  var sleepOnset = [
+    { value: '20:30', weight: 1 },
+    { value: '20:40', weight: 2 },
+    { value: '20:50', weight: 3 },
+    { value: '21:00', weight: 5 },
+    { value: '21:10', weight: 4 },
+    { value: '21:20', weight: 3 },
+    { value: '21:30', weight: 3 },
+    { value: '21:40', weight: 2 },
+    { value: '21:50', weight: 1 },
+    { value: '22:00', weight: 1 },
+  ];
+  // 朝4時チェックは「睡眠」が大半・たまに「覚醒確認後に付き添い」
+  var sleepCheck4am = [
+    { value: '睡眠', weight: 9 },
+    { value: '覚醒確認後に付き添い', weight: 1 },
+  ];
+  // 起床時刻 6:00〜7:30（10分刻み）。7:00 を中心に重み付け。
+  var wakeUp = [
+    { value: '6:00', weight: 1 },
+    { value: '6:10', weight: 1 },
+    { value: '6:20', weight: 2 },
+    { value: '6:30', weight: 3 },
+    { value: '6:40', weight: 4 },
+    { value: '6:50', weight: 5 },
+    { value: '7:00', weight: 5 },
+    { value: '7:10', weight: 3 },
+    { value: '7:20', weight: 2 },
+    { value: '7:30', weight: 1 },
+  ];
   return {
     temperature: function() {
       // 36.0〜36.9 を 36.5 寄りで生成
@@ -1259,7 +1331,9 @@ function getAllocationRandomGenerators_() {
     mealBreakfast: function() { return pickWeightedRandom_(meal); },
     mealLunch: function() { return pickWeightedRandom_(lunch); },
     bath: function() { return pickWeightedRandom_(oxStandard); },
-    sleep: function() { return pickWeightedRandom_(oxStandard); },
+    sleepOnset: function() { return pickWeightedRandom_(sleepOnset); },
+    sleepCheck4am: function() { return pickWeightedRandom_(sleepCheck4am); },
+    wakeUp: function() { return pickWeightedRandom_(wakeUp); },
     bowel: function() { return pickWeightedRandom_(bowel); },
     medicineNight: function() { return pickWeightedRandom_(oxStandard); },
     medicineMorning: function() { return pickWeightedRandom_(oxStandard); },

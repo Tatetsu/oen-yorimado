@@ -91,14 +91,21 @@ function buildChildSummaryText_(childRow, childName, scope) {
 }
 
 /**
- * 確定来館記録配列から指定児童のレコード件数を数える
+ * 確定来館記録配列から指定児童の利用日数（ユニーク日付）を数える
+ * 同一日に実データ・振り分けが重複している場合でも 1 日として扱う
  */
 function countChildVisitsInRecords_(records, childName) {
-  var count = 0;
+  var dateSet = {};
   records.forEach(function(row) {
-    if (row[CONFIRMED_COL.CHILD_NAME - 1] === childName) count++;
+    if (row[CONFIRMED_COL.CHILD_NAME - 1] !== childName) return;
+    var raw = row[CONFIRMED_COL.RECORD_DATE - 1];
+    if (!raw) return;
+    var d = (raw instanceof Date) ? raw : new Date(raw);
+    if (isNaN(d.getTime())) return;
+    var key = formatDateYMD_(d, 'yyyy-MM-dd', 'Asia/Tokyo');
+    dateSet[key] = true;
   });
-  return count;
+  return Object.keys(dateSet).length;
 }
 
 /**
@@ -128,13 +135,13 @@ function writeChildVisitHistory_(sheet, childName, scope) {
 }
 
 /**
- * 来館履歴エリアをクリアする（値・背景色を16列分リセット）
+ * 来館履歴エリアをクリアする（値・背景色を18列分リセット）
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet 児童別ビューシート
  */
 function clearChildVisitHistory_(sheet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < CHILD_VIEW_HISTORY_START_ROW) return;
-  var range = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, lastRow - CHILD_VIEW_HISTORY_START_ROW + 1, 16);
+  var range = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, lastRow - CHILD_VIEW_HISTORY_START_ROW + 1, 18);
   range.clearContent();
   range.setBackground(null);
 }
@@ -161,7 +168,9 @@ function extractChildHistory_(visits, childName) {
         row[CONFIRMED_COL.MEAL_BREAKFAST - 1],
         row[CONFIRMED_COL.MEAL_LUNCH - 1],
         row[CONFIRMED_COL.BATH - 1],
-        row[CONFIRMED_COL.SLEEP - 1],
+        row[CONFIRMED_COL.SLEEP_ONSET - 1],
+        row[CONFIRMED_COL.SLEEP_CHECK_4AM - 1],
+        row[CONFIRMED_COL.WAKE_UP - 1],
         row[CONFIRMED_COL.BOWEL - 1],
         row[CONFIRMED_COL.MEDICINE_NIGHT - 1],
         row[CONFIRMED_COL.MEDICINE_MORNING - 1],
@@ -184,7 +193,7 @@ function extractChildHistory_(visits, childName) {
  * @param {Array<Array>} historyData 来館履歴データ
  */
 function writeHistoryToSheet_(sheet, historyData) {
-  var dataRange = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 16);
+  var dataRange = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 18);
   dataRange.setValues(historyData);
 
   // 記録日列の表示形式
@@ -202,8 +211,8 @@ function writeHistoryToSheet_(sheet, historyData) {
   // データ行の罫線（印刷向け）
   dataRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
 
-  // データ行の中央寄せ（連絡事項以外）
-  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 15)
+  // データ行の中央寄せ（連絡事項以外の17列）
+  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, historyData.length, 17)
     .setHorizontalAlignment('center');
 
   Logger.log('来館履歴を書き込みました: ' + historyData.length + '件');

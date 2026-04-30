@@ -20,16 +20,16 @@
 ### 対象レコードの抽出
 
 - フォームの回答シートから指定日の記録を取得
-- N列（`EMAIL_SENT`）が空欄のレコードのみ送信対象（送信済みは重複送信しない）
+- T列（`EMAIL_SENT`）が空欄のレコードのみ送信対象（送信済みは重複送信しない）
 
 ### 送信後の処理
 
-N列に `「送信済 yyyy/MM/dd HH:mm」` を書き込む。書き込み先は**スタッフ用_回答シート**（`STAFF_SHEET_ID`）。
+T列に `「送信済 yyyy/MM/dd HH:mm」` を書き込む。書き込み先は**スタッフ用_回答シート**（`STAFF_SHEET_ID`）。
 
 ### メール本文テンプレート
 
-`utils.gs` の `DEFAULT_EMAIL_TEMPLATE` 定数（設定シート row19「メール本文」で上書き可能）。
-2026-04 で食事(夕/朝/昼)・服薬(夜/朝)の分離に対応。
+`utils.gs` の `DEFAULT_EMAIL_TEMPLATE` 定数（設定シート row21「メール本文」で上書き可能）。
+2026-04 で食事(夕/朝/昼)・服薬(夜/朝)の分離に対応。さらに 2026-04（後半）で旧「睡眠」を **入眠時刻 / 朝4時チェック / 起床時刻** の3項目に置換。
 
 ```
 {保護者名} 様
@@ -47,7 +47,9 @@ N列に `「送信済 yyyy/MM/dd HH:mm」` を書き込む。書き込み先は*
 ・朝食: {朝食}
 ・昼食: {昼食}
 ・入浴: {入浴}
-・睡眠: {睡眠}
+・入眠時刻: {入眠時刻}
+・朝4時チェック: {朝4時チェック}
+・起床時刻: {起床時刻}
 ・便: {便}
 ・服薬(夜): {服薬(夜)}
 ・服薬(朝): {服薬(朝)}
@@ -70,15 +72,17 @@ N列に `「送信済 yyyy/MM/dd HH:mm」` を書き込む。書き込み先は*
 | `{朝食}` | フォーム回答 J列 | FORM_COL.MEAL_BREAKFAST |
 | `{昼食}` | フォーム回答 K列 | FORM_COL.MEAL_LUNCH |
 | `{入浴}` | フォーム回答 L列 | FORM_COL.BATH |
-| `{睡眠}` | フォーム回答 M列 | FORM_COL.SLEEP |
-| `{便}` | フォーム回答 N列 | FORM_COL.BOWEL |
-| `{服薬(夜)}` | フォーム回答 O列 | FORM_COL.MEDICINE_NIGHT |
-| `{服薬(朝)}` | フォーム回答 P列 | FORM_COL.MEDICINE_MORNING |
-| `{連絡事項}` | フォーム回答 Q列 | FORM_COL.NOTES |
+| `{入眠時刻}` | フォーム回答 M列 | FORM_COL.SLEEP_ONSET |
+| `{朝4時チェック}` | フォーム回答 N列 | FORM_COL.SLEEP_CHECK_4AM |
+| `{起床時刻}` | フォーム回答 O列 | FORM_COL.WAKE_UP |
+| `{便}` | フォーム回答 P列 | FORM_COL.BOWEL |
+| `{服薬(夜)}` | フォーム回答 Q列 | FORM_COL.MEDICINE_NIGHT |
+| `{服薬(朝)}` | フォーム回答 R列 | FORM_COL.MEDICINE_MORNING |
+| `{連絡事項}` | フォーム回答 S列 | FORM_COL.NOTES |
 
 ### メール件名
 
-設定シート row18（`SETTINGS_ROW.EMAIL_SUBJECT`）の値を使用。未設定時のフォールバックは `DEFAULT_EMAIL_SUBJECT`。
+設定シート row20（`SETTINGS_ROW.EMAIL_SUBJECT`）の値を使用。未設定時のフォールバックは `DEFAULT_EMAIL_SUBJECT`。
 
 ### 宛先
 
@@ -104,7 +108,7 @@ GAS の各関数の catch ブロックで `logError_('関数名', error)` を呼
 
 ### エラー通知先
 
-設定シート row17（`SETTINGS_ROW.ERROR_EMAIL`）にカンマ区切りでメールアドレスを設定する。GAS実行者のメールは常に含まれる（`getErrorNotifyRecipients_`）。
+設定シート row19（`SETTINGS_ROW.ERROR_EMAIL`）にカンマ区切りでメールアドレスを設定する。GAS実行者のメールは常に含まれる（`getErrorNotifyRecipients_`）。
 
 ---
 
@@ -112,9 +116,9 @@ GAS の各関数の catch ブロックで `logError_('関数名', error)` を呼
 
 | 行 | 設定項目名 | 内容 |
 |----|----------|------|
-| 17 | エラー通知先メール | カンマ区切り複数可 |
-| 18 | メール件名 | 保護者向けメールの件名テンプレート |
-| 19 | メール本文 | 保護者向けメールの本文テンプレート |
+| 19 | エラー通知先メール | カンマ区切り複数可 |
+| 20 | メール件名 | 保護者向けメールの件名テンプレート |
+| 21 | メール本文 | 保護者向けメールの本文テンプレート |
 
 ---
 
