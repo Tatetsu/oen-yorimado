@@ -144,6 +144,7 @@ function clearChildVisitHistory_(sheet) {
   var range = sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 1, lastRow - CHILD_VIEW_HISTORY_START_ROW + 1, 18);
   range.clearContent();
   range.setBackground(null);
+  range.setFontColor(null);
 }
 
 /**
@@ -207,6 +208,14 @@ function writeHistoryToSheet_(sheet, historyData) {
   // 体温列の表示形式（列7）
   sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 7, historyData.length, 1)
     .setNumberFormat('0.0');
+
+  // 入眠時刻列の表示形式（列12）
+  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 12, historyData.length, 1)
+    .setNumberFormat('HH:mm');
+
+  // 起床時刻列の表示形式（列14）
+  sheet.getRange(CHILD_VIEW_HISTORY_START_ROW, 14, historyData.length, 1)
+    .setNumberFormat('HH:mm');
 
   // データ行の罫線（印刷向け）
   dataRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
