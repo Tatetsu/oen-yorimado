@@ -191,7 +191,6 @@ function getFormResponsesWeb(token, mode, year, month) {
       medicineNight: String(row[FORM_COL.MEDICINE_NIGHT - 1] || ''),
       medicineMorning: String(row[FORM_COL.MEDICINE_MORNING - 1] || ''),
       notes: String(row[FORM_COL.NOTES - 1] || ''),
-      isOvernight: isOvernightRow_(row),
     });
   }
 

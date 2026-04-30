@@ -214,9 +214,9 @@ function saveLastBounceCheckDate_(date) {
 }
 
 /**
- * 宿泊レコードのバリデーションを実行する（ユニーク宿泊キー方式）
+ * フォーム回答のバリデーションを実行する
  *
- * 新仕様での検知ルール:
+ * 検知ルール:
  *   1. 入退所いずれかが空欄
  *   2. 入所日時 > 退所日時（時系列が逆転している）
  *   3. 同一児童で重複期間の宿泊がある（既存の宿泊期間に新しい宿泊期間が重なる）
@@ -225,17 +225,29 @@ function saveLastBounceCheckDate_(date) {
  * @param {number} [month] 対象月 1-12（省略時は全期間）
  * @returns {Array<{childName: string, recordDate: Date, issues: Array<string>}>}
  */
-function validateOvernightRecords(year, month) {
+function validateFormResponses_(year, month) {
   var allResponses = getFormResponsesAll_();
-  var stays = pairStayRecords_(allResponses);
-
   var filterByMonth = (year !== undefined && month !== undefined);
   var monthStart = filterByMonth ? new Date(year, month - 1, 1) : null;
   var monthEnd = filterByMonth ? new Date(year, month, 0) : null;
 
-  // 1. 各 stay 単体のチェック（空欄・時系列逆転）
+  // フォーム回答を1行=1宿泊として正規化
+  var stays = allResponses.map(function(row) {
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+    var hasIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
+    var hasOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
+    return {
+      childName: row[FORM_COL.CHILD_NAME - 1],
+      checkIn: hasIn ? checkIn : null,
+      checkOut: hasOut ? checkOut : null,
+      recordDate: getRowRecordDate_(row),
+      issues: [],
+    };
+  }).filter(function(s) { return !!s.childName; });
+
+  // 1. 各レコード単体のチェック（空欄・時系列逆転）
   stays.forEach(function(stay) {
-    stay.issues = stay.issues || [];
     if (!stay.checkIn || !stay.checkOut) {
       stay.issues.push('入所日時または退所日時が空欄');
     } else if (stay.checkIn.getTime() > stay.checkOut.getTime()) {
@@ -247,8 +259,9 @@ function validateOvernightRecords(year, month) {
   var byChild = {};
   stays.forEach(function(stay) {
     if (!stay.childName || !stay.checkIn || !stay.checkOut) return;
-    if (!byChild[stay.childName]) byChild[stay.childName] = [];
-    byChild[stay.childName].push(stay);
+    var name = String(stay.childName);
+    if (!byChild[name]) byChild[name] = [];
+    byChild[name].push(stay);
   });
   Object.keys(byChild).forEach(function(name) {
     var list = byChild[name].slice().sort(function(a, b) {
@@ -284,10 +297,29 @@ function validateOvernightRecords(year, month) {
 }
 
 /**
- * 連泊バリデーション結果をログに書き出して通知する（手動実行用）
+ * 旧API互換: validateFormResponses_ のラッパー
+ * @deprecated validateFormResponses_ を直接呼ぶこと
+ */
+function validateOvernightRecords(year, month) {
+  return validateFormResponses_(year, month);
+}
+
+/**
+ * フォーム回答バリデーション結果をログに書き出して通知する（手動実行用）
+ */
+function runFormResponseValidationManual() {
+  return runOvernightValidationManualImpl_();
+}
+
+/**
+ * @deprecated 旧API互換: 既存メニューバインディングを壊さないため残置
  */
 function runOvernightValidationManual() {
-  var issues = validateOvernightRecords();
+  return runOvernightValidationManualImpl_();
+}
+
+function runOvernightValidationManualImpl_() {
+  var issues = validateFormResponses_();
   if (issues.length === 0) {
     SpreadsheetApp.getUi().alert('フォーム回答検証', '問題は検出されませんでした。', SpreadsheetApp.getUi().ButtonSet.OK);
     return;

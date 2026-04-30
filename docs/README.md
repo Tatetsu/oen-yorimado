@@ -18,7 +18,7 @@
 |---------|------|
 | [specs/google-form.md](specs/google-form.md) | フォームの質問項目・列定義・プルダウン同期の仕組み・スクリプトプロパティ（2026-04に食事3分離/服薬2分離へ更新） |
 | [specs/allocation-logic.md](specs/allocation-logic.md) | 振り分けロジック詳細（優先度・±1ランダム幅・年間枠按分・補完値算出・均等分散） |
-| [specs/overnight-logic.md](specs/overnight-logic.md) | 連泊展開ロジック・月またぎカウントルール |
+| [specs/overnight-logic.md](specs/overnight-logic.md) | 宿泊期間の日付展開ロジック・月またぎカウントルール |
 | [specs/aggregation-logic.md](specs/aggregation-logic.md) | スコープ4種の挙動・月別集計/児童別ビュー/カレンダーのデータソース |
 | [specs/email-notification.md](specs/email-notification.md) | 保護者メール・メール本文テンプレート・バウンス検出・エラー通知 |
 | [specs/triggers.md](specs/triggers.md) | 全トリガー一覧（時間・onEdit・メニュー）とトリガー設定手順 |

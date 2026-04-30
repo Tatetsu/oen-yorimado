@@ -121,4 +121,4 @@
 
 - [`allocation-logic.md`](allocation-logic.md) — 振り分けの本体ロジック (実装済)
 - [`google-form.md`](google-form.md) — フォーム新スキーマ
-- [`overnight-logic.md`](overnight-logic.md) — 連泊展開 (月跨ぎ集計)
+- [`overnight-logic.md`](overnight-logic.md) — 宿泊展開 (月跨ぎ集計)

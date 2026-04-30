@@ -38,8 +38,8 @@
 
 ### カウント方法
 
-`countVisitsByScope_` → `pairStayRecords_` で「児童名+入所日（yyyy-MM-dd）」の宿泊単位にまとめ、`expandStayToDates_(checkIn, checkOut)` で連泊を日ごとに展開する。
-展開後の各日付が `matchesScope_` を通過した分のみカウントする。
+`countVisitsByScope_` でフォーム1行ごとに `expandStayToDates_(checkIn, checkOut)` を呼び、入所日〜退所予定日を1日ずつ展開する。
+展開後の各日付が `matchesScope_` を通過した分（=対象月内の日付のユニーク件数）のみカウントする。
 
 ```
 例: 2泊3日（3/1入所〜3/3退所）で3月スコープ

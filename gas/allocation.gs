@@ -99,18 +99,21 @@ function allocateRemainingPoints_(year, month) {
     return;
   }
 
-  // 2. フォーム回答から対象月の実来館データ取得（連泊ペアリング後）
+  // 2. フォーム回答から対象月の実来館データ取得
   var formResponses = getFormResponsesByMonth(year, month);
-  var stays = pairStayRecords_(formResponses);
 
   // 3. 児童名ごとの実来館回数と来館日マップを作成（対象月の日数のみカウント・月またぎ対応）
+  //    フォーム1行ごとに入退所日付を展開してユニーク日付をカウントする。
   var visitCountMap = {};
   var visitDateMap = {};  // {児童名: {日付文字列: true}}
-  stays.forEach(function(stay) {
-    var childName = stay.childName;
+  formResponses.forEach(function(row) {
+    var childName = row[FORM_COL.CHILD_NAME - 1];
     if (!childName) return;
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    var checkOut = row[FORM_COL.CHECK_OUT - 1];
+    var recordDate = getRowRecordDate_(row);
     if (!visitDateMap[childName]) visitDateMap[childName] = {};
-    expandStayToDates_(stay.recordDate, stay.checkIn, stay.checkOut).forEach(function(d) {
+    expandStayToDates_(recordDate, checkIn, checkOut).forEach(function(d) {
       // 対象月の日付のみカウント
       if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
         var dateKey = formatDateKey_(d);
@@ -156,18 +159,18 @@ function allocateRemainingPoints_(year, month) {
   var maxVisitsPerDay = getMaxVisitsPerDay_();
 
   // 7. 各日付の新着者数マップを作成（満枠判定用）
-  //    満枠=1日最大来館数は「その日の新着者（入所日=その日の宿泊）」を対象とする。
-  //    連泊2日目（持ち越し）は新着者ではないためカウントしない。
-  //    （月間利用枠の消費は別途 visitCountMap で連泊展開済み）
+  //    満枠=1日最大来館数は「その日の新着者（=その日が入所日のレコード）」のみで判定する。
+  //    複数日宿泊の中日・退所日は新着者ではないためカウントしない。
+  //    （月間利用枠の消費は別途 visitCountMap で日付展開済み）
   var dailyVisitCounts = {};
   allDates.forEach(function(date) {
     dailyVisitCounts[formatDateKey_(date)] = 0;
   });
-  stays.forEach(function(stay) {
-    var arrival = stay.checkIn instanceof Date ? stay.checkIn : (stay.recordDate instanceof Date ? stay.recordDate : null);
-    if (!arrival || arrival.getFullYear() < 1900) return;
-    if (arrival.getFullYear() !== year || (arrival.getMonth() + 1) !== month) return;
-    var dateKey = formatDateKey_(new Date(arrival.getFullYear(), arrival.getMonth(), arrival.getDate()));
+  formResponses.forEach(function(row) {
+    var checkIn = row[FORM_COL.CHECK_IN - 1];
+    if (!(checkIn instanceof Date) || checkIn.getFullYear() < 1900) return;
+    if (checkIn.getFullYear() !== year || (checkIn.getMonth() + 1) !== month) return;
+    var dateKey = formatDateKey_(new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate()));
     if (dailyVisitCounts[dateKey] !== undefined) {
       dailyVisitCounts[dateKey]++;
     }
@@ -305,16 +308,15 @@ function allocateRemainingPoints_(year, month) {
           checkOutDT = new Date(checkOutDT.getTime() + 24 * 60 * 60 * 1000);
         }
         var checkOutDate = new Date(checkOutDT.getFullYear(), checkOutDT.getMonth(), checkOutDT.getDate());
-        var isOvernight = (selectedDate.getTime() !== checkOutDate.getTime());
+        var spansMultipleDays = (selectedDate.getTime() !== checkOutDate.getTime());
         // 退所日が対象月外（=月末またぎ）の場合は退所日行は作らない（実データの月別フィルタと同じ挙動）
         var checkOutInScope = (checkOutDate.getFullYear() === year && (checkOutDate.getMonth() + 1) === month);
-        var generateCheckoutRow = isOvernight && checkOutInScope;
-        // 月間利用枠を「日数」で消費するため、連泊の2日消費でオーバーシュートする場合はこの候補をスキップ
+        var generateCheckoutRow = spansMultipleDays && checkOutInScope;
+        // 月間利用枠を「日数」で消費するため、2日消費でオーバーシュートする場合はこの候補をスキップ
         if (generateCheckoutRow && allocated + 2 > remaining) continue;
-        var stayPk = isOvernight ? buildStayPk_(childName, checkInDT) : '';
 
-        // 1宿泊=フォーム1レコード相当の値を1度だけ生成し、入所日行/退所日行で複製する
-        // （実データはフォーム1回送信→確定来館記録で複製の流れ。同じ内容で記録日と往/復のみ変わる）
+        // 1レコードの値を1度だけ生成し、入所日行/退所日行で複製する
+        // （実データはフォーム1回送信→確定来館記録で日付展開の流れ。同じ内容で利用日と往/復のみ変わる）
         var stayStaff = pickStaffForDate_(selectedDate);
         var stayValues = {
           temperature: randomGen.temperature(),
@@ -354,12 +356,10 @@ function allocateRemainingPoints_(year, month) {
             stayValues.medicineNight,
             stayValues.medicineMorning,
             stayValues.notes,
-            isOvernight,
-            stayPk,
           ];
         };
 
-        // 入所日行（記録日=入所日、往=1、復は退所日行で立つので空）
+        // 入所日行（利用日=入所日、往=1、復は退所日行で立つので空）
         allocationResults.push(buildRow_(selectedDate, 1, ''));
 
         // 退所日行（対象月内に退所が収まる場合のみ複製。月またぎは欠落）
@@ -369,11 +369,11 @@ function allocateRemainingPoints_(year, month) {
 
         dailyVisitCounts[selectedKey]++;
         childOccupiedKeys[selectedKey] = true;
-        if (isOvernight && checkOutInScope) {
+        if (spansMultipleDays && checkOutInScope) {
           // 退所日も同児童の連続日抑制対象に追加（実データ集計の通し日付として扱う）
           childOccupiedKeys[formatDateKey_(checkOutDate)] = true;
         }
-        // 月間利用枠は「日数」で消費する。連泊で対象月内に退所する場合は2日分を消費
+        // 月間利用枠は「日数」で消費する。複数日宿泊で対象月内に退所する場合は2日分を消費
         allocated += generateCheckoutRow ? 2 : 1;
       }
     }
@@ -469,7 +469,7 @@ function clearAllocationsForMonth_(year, month) {
   var lastRow = sheet.getLastRow();
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
-  var colCount = CONFIRMED_COL.STAY_PK; // 列数=末尾(STAY_PK=23)
+  var colCount = CONFIRMED_COL.NOTES; // 列数=末尾(NOTES=21)
   var rowCount = lastRow - CONFIRMED_DATA_START_ROW + 1;
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, rowCount, colCount).getValues();
 
@@ -499,7 +499,7 @@ function clearAllocationsForMonth_(year, month) {
  */
 function writeAllocationsToConfirmed_(results) {
   var sheet = getSheet(SHEET_NAMES.CONFIRMED_VISITS);
-  var colCount = CONFIRMED_COL.STAY_PK; // 列の末尾=総数（STAY_PK=23）
+  var colCount = CONFIRMED_COL.NOTES; // 列の末尾=総数（NOTES=21）
 
   // 既存データと振り分け結果をマージして日付順にソートし直す
   var lastRow = sheet.getLastRow();
@@ -772,7 +772,7 @@ function fillStaff2ForFullDays_(year, month) {
   if (lastRow < CONFIRMED_DATA_START_ROW) return;
 
   var numRows = lastRow - CONFIRMED_DATA_START_ROW + 1;
-  var colCount = CONFIRMED_COL.STAY_PK; // 23
+  var colCount = CONFIRMED_COL.NOTES; // 21
   var data = sheet.getRange(CONFIRMED_DATA_START_ROW, 1, numRows, colCount).getValues();
 
   // 対象月の行インデックスを収集。

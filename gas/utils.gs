@@ -164,19 +164,19 @@ const DAY_OF_WEEK_MAP = {
 // FORM_COL と同じ粒度で食事・服薬を分離する
 // 1列目=DATA_TYPE はフォームの TIMESTAMP と同位置。
 // CHECK_OUT の直後に PICKUP_OUTBOUND/PICKUP_RETURN（送迎の往/復）が入る
-//   → 月別の単純合計で送迎加算カウントが取れる（月またぎ・連泊にも対応）
-// OVERNIGHT_FLAG: 連泊フラグ（入所日と退所日が異なる行で true）
-// STAY_PK: 宿泊単位のユニークキー（児童名|入所日 yyyy-MM-dd）。最終列・既定で非表示。
+//   → 月別の単純合計で送迎加算カウントが取れる（月またぎにも対応）
+// 「連泊」概念は廃止：フォーム1行=1宿泊、入退所日時の差から日付範囲を展開して
+// 確定来館記録に書き出す（同じ児童・同日に2回来館する想定はない運用）。
 const CONFIRMED_COL = {
   DATA_TYPE: 1,
   RECORD_DATE: 2,
   STAFF_NAME: 3,           // スタッフ1
   STAFF_NAME_2: 4,         // スタッフ2（任意）
   CHILD_NAME: 5,
-  CHECK_IN: 6,             // 入所日時（ペアリング後の論理1宿泊の値）
-  CHECK_OUT: 7,            // 退所予定日時（ペアリング後の論理1宿泊の値）
-  PICKUP_OUTBOUND: 8,      // 送迎(往): 記録日が入所日と一致 → 1
-  PICKUP_RETURN: 9,        // 送迎(復): 記録日が退所予定日と一致 → 1
+  CHECK_IN: 6,             // 入所日時
+  CHECK_OUT: 7,            // 退所予定日時
+  PICKUP_OUTBOUND: 8,      // 送迎(往): 利用日が入所日と一致 → 1
+  PICKUP_RETURN: 9,        // 送迎(復): 利用日が退所予定日と一致 → 1
   TEMPERATURE: 10,
   MEAL_DINNER: 11,         // 夕食
   MEAL_BREAKFAST: 12,      // 朝食
@@ -189,8 +189,6 @@ const CONFIRMED_COL = {
   MEDICINE_NIGHT: 19,      // 服薬(夜)
   MEDICINE_MORNING: 20,    // 服薬(朝)
   NOTES: 21,
-  OVERNIGHT_FLAG: 22,      // 連泊フラグ（true/false）
-  STAY_PK: 23,             // 宿泊PK（児童名|入所日 yyyy-MM-dd）
 };
 
 // メール件名のデフォルト値（設定シート未設定時のフォールバック）
@@ -413,96 +411,63 @@ function getActiveChildren() {
 
 /**
  * フォームの回答から指定年のデータを取得する
- * 入所日時〜退所日時の滞在期間が対象年と重なるレコードも返す（年またぎ連泊対応）
- * 児童名+入所日（yyyy-MM-dd）でペアリングした論理1宿泊が対象年と重なる場合に構成全レコードを返す。
+ * 入所日時〜退所日時の滞在期間が対象年と重なるレコードを返す（年またぎ対応）
  * @param {number} year 年
  * @returns {Array<Array>} 該当年のフォーム回答データ
  */
 function getFormResponsesByYear(year) {
   var allResponses = getFormResponsesAll_();
-  var stays = pairStayRecords_(allResponses);
   var yearStart = new Date(year, 0, 1);
   var yearEnd = new Date(year, 11, 31);
-
-  var includeRows = [];
-  var seen = {};
-
-  stays.forEach(function(stay) {
-    var stayStart = stay.checkIn ? new Date(stay.checkIn.getFullYear(), stay.checkIn.getMonth(), stay.checkIn.getDate()) : null;
-    var stayEnd = stay.checkOut ? new Date(stay.checkOut.getFullYear(), stay.checkOut.getMonth(), stay.checkOut.getDate()) : null;
-
-    var overlaps = false;
-    if (stayStart && stayEnd) {
-      overlaps = stayStart <= yearEnd && stayEnd >= yearStart;
-    } else if (stayStart) {
-      overlaps = stayStart.getFullYear() === year;
-    } else if (stayEnd) {
-      overlaps = stayEnd.getFullYear() === year;
-    } else {
-      overlaps = stay.recordDate.getFullYear() === year;
-    }
-
-    if (overlaps) {
-      stay.sourceRows.forEach(function(row) {
-        var key = row[FORM_COL.TIMESTAMP - 1] + '|' + row[FORM_COL.CHILD_NAME - 1];
-        if (!seen[key]) {
-          seen[key] = true;
-          includeRows.push(row);
-        }
-      });
-    }
+  return allResponses.filter(function(row) {
+    return rowOverlapsRange_(row, yearStart, yearEnd);
   });
-
-  return includeRows;
 }
 
 /**
  * フォームの回答から指定年月のデータを取得する
- * 入所日時〜退所日時の滞在期間が対象月と重なるレコードも返す（月またぎ連泊対応）
- * 連泊レコード（入所のみ/退所のみ/両方空欄）は児童名でペアリングし、
- * ペアリング後の論理1宿泊が対象月と重なる場合に構成全レコードを返す。
+ * 入所日時〜退所日時の滞在期間が対象月と重なるレコードを返す（月またぎ対応）
  * @param {number} year 年
  * @param {number} month 月（1-12）
  * @returns {Array<Array>} 該当月のフォーム回答データ
  */
 function getFormResponsesByMonth(year, month) {
   var allResponses = getFormResponsesAll_();
-  var stays = pairStayRecords_(allResponses);
   var monthStart = new Date(year, month - 1, 1);
   var monthEnd = new Date(year, month, 0);
-
-  var includeRows = [];
-  var seen = {};
-
-  stays.forEach(function(stay) {
-    // ペアリング後の宿泊期間が対象月と重なるか判定
-    var stayStart = stay.checkIn ? new Date(stay.checkIn.getFullYear(), stay.checkIn.getMonth(), stay.checkIn.getDate()) : null;
-    var stayEnd = stay.checkOut ? new Date(stay.checkOut.getFullYear(), stay.checkOut.getMonth(), stay.checkOut.getDate()) : null;
-
-    var overlaps = false;
-    if (stayStart && stayEnd) {
-      overlaps = stayStart <= monthEnd && stayEnd >= monthStart;
-    } else if (stayStart) {
-      overlaps = stayStart <= monthEnd && stayStart >= monthStart;
-    } else if (stayEnd) {
-      overlaps = stayEnd <= monthEnd && stayEnd >= monthStart;
-    } else {
-      // 両方空欄（連泊中日のみで構成）→ 記録日で判定
-      overlaps = stay.recordDate.getFullYear() === year && (stay.recordDate.getMonth() + 1) === month;
-    }
-
-    if (overlaps) {
-      stay.sourceRows.forEach(function(row) {
-        var key = row[FORM_COL.TIMESTAMP - 1] + '|' + row[FORM_COL.CHILD_NAME - 1];
-        if (!seen[key]) {
-          seen[key] = true;
-          includeRows.push(row);
-        }
-      });
-    }
+  return allResponses.filter(function(row) {
+    return rowOverlapsRange_(row, monthStart, monthEnd);
   });
+}
 
-  return includeRows;
+/**
+ * フォーム回答1行が指定期間と重なるかを判定する
+ * @param {Array} row フォーム回答の1行
+ * @param {Date} rangeStart 期間開始
+ * @param {Date} rangeEnd 期間終了（含む）
+ * @returns {boolean}
+ */
+function rowOverlapsRange_(row, rangeStart, rangeEnd) {
+  var checkIn = row[FORM_COL.CHECK_IN - 1];
+  var checkOut = row[FORM_COL.CHECK_OUT - 1];
+  var hasIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
+  var hasOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
+  if (hasIn && hasOut) {
+    var inDay = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+    var outDay = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
+    return inDay <= rangeEnd && outDay >= rangeStart;
+  }
+  if (hasIn) {
+    var inDay2 = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
+    return inDay2 >= rangeStart && inDay2 <= rangeEnd;
+  }
+  if (hasOut) {
+    var outDay2 = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
+    return outDay2 >= rangeStart && outDay2 <= rangeEnd;
+  }
+  // 入退所どちらも空欄: タイムスタンプ日付で判定
+  var rd = getRowRecordDate_(row);
+  return rd && rd >= rangeStart && rd <= rangeEnd;
 }
 
 /**
@@ -843,182 +808,6 @@ function expandStayToDates_(recordDate, checkIn, checkOut) {
   var base2 = (recordDate instanceof Date) ? recordDate : new Date(recordDate);
   if (isNaN(base2.getTime())) return [];
   return [new Date(base2.getFullYear(), base2.getMonth(), base2.getDate())];
-}
-
-/**
- * フォーム回答を「児童名+入所日」のユニークキーで論理1宿泊にペアリングする
- *
- * 新仕様（ユニーク宿泊キー方式）:
- *   - 全レコードに入所日時・退所日時を記入する運用
- *   - 児童名+入所日（日付のみ）が同じレコードは同一宿泊（中日の様子記録は同じ入退所を共有）
- *   - 同一児童が同日に2回別々の来館をすることは無い運用前提
- *   - 連泊は1夜ごとに別レコードのため入所日が日ごとに異なりPK衝突しない
- *   - 状態機械によるペアリングは不要
- *   - プライマリ行 = 記録日と入所日が一致する行（無ければグループ内で記録日が最も早い行）
- *
- * @param {Array<Array>} formResponses フォーム回答データ（ヘッダー除く）
- * @returns {Array<{
- *   childName: string,
- *   checkIn: Date|null,
- *   checkOut: Date|null,
- *   recordDate: Date,
- *   isOvernight: boolean,
- *   sourceRows: Array<Array>,
- *   primaryRow: Array,
- *   issues: Array<string>,
- *   stayPk: string
- * }>} 論理1宿泊のリスト
- */
-function pairStayRecords_(formResponses) {
-  var groups = {};
-
-  formResponses.forEach(function(row) {
-    var name = row[FORM_COL.CHILD_NAME - 1];
-    if (!name) return;
-
-    var checkIn = row[FORM_COL.CHECK_IN - 1];
-    var checkOut = row[FORM_COL.CHECK_OUT - 1];
-    var recordDate = getRowRecordDate_(row);
-    var hasCheckIn = (checkIn instanceof Date) && checkIn.getFullYear() >= 1900;
-    var hasCheckOut = (checkOut instanceof Date) && checkOut.getFullYear() >= 1900;
-
-    // 入所日時が無いレコードは利用日+タイムスタンプで独立した1宿泊として扱う（移行データ吸収用）
-    var key;
-    if (hasCheckIn) {
-      key = buildStayPk_(name, checkIn);
-    } else {
-      var ts = row[FORM_COL.TIMESTAMP - 1];
-      key = name + '|NOIN|' +
-        (recordDate instanceof Date ? recordDate.getTime() : String(recordDate || '')) + '|' +
-        (ts instanceof Date ? ts.getTime() : String(ts || ''));
-    }
-
-    if (!groups[key]) {
-      groups[key] = {
-        childName: name,
-        checkIn: hasCheckIn ? checkIn : null,
-        checkOut: hasCheckOut ? checkOut : null,
-        recordDate: recordDate,
-        sourceRows: [row],
-        issues: [],
-      };
-    } else {
-      var g = groups[key];
-      g.sourceRows.push(row);
-      // 入退所日時が後続レコードで埋まる場合は採用（運用上同一値であるべきだが、片方欠損レコード救済）
-      if (!g.checkIn && hasCheckIn) g.checkIn = checkIn;
-      if (!g.checkOut && hasCheckOut) g.checkOut = checkOut;
-    }
-  });
-
-  var stays = Object.keys(groups).map(function(key) {
-    var g = groups[key];
-    var primary = pickPrimaryRow_(g.sourceRows, g.checkIn);
-    var primaryRecordDate = getRowRecordDate_(primary);
-    var isOvernight = false;
-    if (g.checkIn && g.checkOut) {
-      var inDay = new Date(g.checkIn.getFullYear(), g.checkIn.getMonth(), g.checkIn.getDate());
-      var outDay = new Date(g.checkOut.getFullYear(), g.checkOut.getMonth(), g.checkOut.getDate());
-      isOvernight = inDay.getTime() !== outDay.getTime();
-    }
-    return {
-      childName: g.childName,
-      checkIn: g.checkIn,
-      checkOut: g.checkOut,
-      recordDate: primaryRecordDate || g.recordDate,
-      isOvernight: isOvernight,
-      sourceRows: g.sourceRows,
-      primaryRow: primary,
-      issues: g.issues,
-      stayPk: g.checkIn ? buildStayPk_(g.childName, g.checkIn) : '',
-    };
-  });
-
-  stays.sort(function(a, b) {
-    var ta = a.recordDate ? a.recordDate.getTime() : 0;
-    var tb = b.recordDate ? b.recordDate.getTime() : 0;
-    var t = ta - tb;
-    return t !== 0 ? t : String(a.childName || '').localeCompare(String(b.childName || ''));
-  });
-  return stays;
-}
-
-/**
- * グループ内のソース行から「プライマリ行」を選ぶ
- * - 記録日 == 入所日（日付一致）の行を優先
- * - 該当無しの場合は記録日が最も早い行を採用
- * @param {Array<Array>} rows ソース行
- * @param {Date|null} checkIn 入所日時
- * @returns {Array} プライマリ行
- */
-function pickPrimaryRow_(rows, checkIn) {
-  if (rows.length === 1) return rows[0];
-  if (checkIn instanceof Date) {
-    var inKey = formatDateKey_(new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate()));
-    for (var i = 0; i < rows.length; i++) {
-      var rd = getRowRecordDate_(rows[i]);
-      if (rd && formatDateKey_(rd) === inKey) return rows[i];
-    }
-  }
-  // 利用日昇順で先頭
-  var sorted = rows.slice().sort(function(a, b) {
-    var ra = getRowRecordDate_(a);
-    var rb = getRowRecordDate_(b);
-    return ((ra && ra.getTime()) || 0) - ((rb && rb.getTime()) || 0);
-  });
-  return sorted[0];
-}
-
-/**
- * 旧API互換: pairStayRecords_ のラッパー
- * 既存の呼び出し側を順次差し替えるための暫定。Phase 3 で削除予定。
- * @deprecated pairStayRecords_ を直接呼び出すこと
- */
-function pairOvernightRecords_(formResponses) {
-  return pairStayRecords_(formResponses);
-}
-
-/**
- * 宿泊PK文字列を生成する
- * 形式: "<児童名>|<入所日>"（例: "aさん|2026-04-30"）
- * 同一児童が同日に2回別々に来館することは無い運用前提。
- * 連泊は1夜ごとに別レコード（入所日が日ごとに異なる）のためPK衝突しない。
- * 日付はタイムゾーン依存を避けるためスクリプトTZでフォーマット
- * @param {string} childName 児童名
- * @param {Date} checkIn 入所日時
- * @returns {string} 宿泊PK
- */
-function buildStayPk_(childName, checkIn) {
-  if (!childName || !(checkIn instanceof Date) || isNaN(checkIn.getTime())) return '';
-  var dateStr = Utilities.formatDate(checkIn, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  return String(childName) + '|' + dateStr;
-}
-
-/**
- * フォーム/確定来館記録の行が連泊扱いかを判定する
- * 入所日と退所日が異なる行を連泊とみなす。
- * 確定来館記録側のみ、旧 OVERNIGHT_FLAG 列の値を補助フォールバックとして使用する。
- * @param {Array} row フォーム回答 or 確定来館記録の1行
- * @param {boolean} [fromConfirmed=false] true=CONFIRMED_COL基準、false=FORM_COL基準
- * @returns {boolean}
- */
-function isOvernightRow_(row, fromConfirmed) {
-  var checkInCol = fromConfirmed ? CONFIRMED_COL.CHECK_IN : FORM_COL.CHECK_IN;
-  var checkOutCol = fromConfirmed ? CONFIRMED_COL.CHECK_OUT : FORM_COL.CHECK_OUT;
-  var checkIn = row[checkInCol - 1];
-  var checkOut = row[checkOutCol - 1];
-  if ((checkIn instanceof Date) && (checkOut instanceof Date) && checkIn.getFullYear() >= 1900 && checkOut.getFullYear() >= 1900) {
-    var inDay = new Date(checkIn.getFullYear(), checkIn.getMonth(), checkIn.getDate());
-    var outDay = new Date(checkOut.getFullYear(), checkOut.getMonth(), checkOut.getDate());
-    if (inDay.getTime() !== outDay.getTime()) return true;
-  }
-  if (!fromConfirmed) return false;
-  // フォールバック: 確定来館記録の旧 OVERNIGHT_FLAG 列の値（移行期データ向け）
-  var v = row[CONFIRMED_COL.OVERNIGHT_FLAG - 1];
-  if (v === true) return true;
-  if (v === false || v === '' || v == null) return false;
-  var s = String(v).trim().toLowerCase();
-  return s === 'true' || s === 'on' || s === '1' || s === '連泊' || s === '○' || s === 'はい';
 }
 
 /**

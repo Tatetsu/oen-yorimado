@@ -225,19 +225,6 @@ function processEmailSend_(records, fixedTargetDate) {
   // 児童マスタを取得してマップ化（児童名 → 行データ）
   var childMasterMap = buildChildNameToRowMap_();
 
-  // 連泊ペアリングを事前計算: 各レコードに紐付く論理1宿泊の入退所を引けるようにする
-  var allResponses = getFormResponsesAll_();
-  var stays = pairStayRecords_(allResponses);
-  var stayByTimestamp = {};
-  stays.forEach(function(stay) {
-    stay.sourceRows.forEach(function(srcRow) {
-      var ts = srcRow[FORM_COL.TIMESTAMP - 1];
-      var name = srcRow[FORM_COL.CHILD_NAME - 1];
-      var key = (ts instanceof Date ? ts.getTime() : String(ts)) + '|' + name;
-      stayByTimestamp[key] = stay;
-    });
-  });
-
   // スクリプトプロパティから施設名を取得
   var props = PropertiesService.getScriptProperties();
   var facilityName = props.getProperty('FACILITY_NAME') || '施設';
@@ -279,11 +266,9 @@ function processEmailSend_(records, fixedTargetDate) {
     sendableCount++;
     try {
       var ts2 = record[FORM_COL.TIMESTAMP - 1];
-      var stayKey = (ts2 instanceof Date ? ts2.getTime() : String(ts2)) + '|' + childName;
-      var pairedStay = stayByTimestamp[stayKey] || null;
       // メール本文の対象日: 引数で固定日が指定されていればそれを、無ければレコードの利用日を使う
       var perRecordTargetDate = fixedTargetDate || getRowRecordDate_(record) || (ts2 instanceof Date ? new Date(ts2.getFullYear(), ts2.getMonth(), ts2.getDate()) : new Date());
-      var emailData = buildEmailData_(record, masterRow, perRecordTargetDate, facilityName, pairedStay);
+      var emailData = buildEmailData_(record, masterRow, perRecordTargetDate, facilityName);
       MailApp.sendEmail({
         to: String(parentEmail).trim(),
         subject: emailData.subject,
@@ -397,7 +382,7 @@ function getFormResponsesSince_(since) {
  * @param {Object} [pairedStay] 連泊ペアリング後の論理1宿泊（連泊時の入退所表示に使用）
  * @returns {{subject: string, body: string}}
  */
-function buildEmailData_(record, masterRow, targetDate, facilityName, pairedStay) {
+function buildEmailData_(record, masterRow, targetDate, facilityName) {
   var dateStr = formatDateYMD_(targetDate, 'M月d日');
   var childName = record[FORM_COL.CHILD_NAME - 1];
   var parentName = masterRow[MASTER_COL.PARENT_NAME - 1] || '';
@@ -405,13 +390,9 @@ function buildEmailData_(record, masterRow, targetDate, facilityName, pairedStay
   var subject = getEmailSubjectFromSettings_();
   var template = getEmailBodyFromSettings_();
 
-  // 連泊レコードは入退所が空欄のことがあるため、ペアリング後の値を優先採用
+  // フォーム1行=1宿泊運用のため、レコードの入退所をそのまま採用する
   var displayCheckIn = record[FORM_COL.CHECK_IN - 1];
   var displayCheckOut = record[FORM_COL.CHECK_OUT - 1];
-  if (pairedStay && pairedStay.isOvernight) {
-    if (!(displayCheckIn instanceof Date) && pairedStay.checkIn) displayCheckIn = pairedStay.checkIn;
-    if (!(displayCheckOut instanceof Date) && pairedStay.checkOut) displayCheckOut = pairedStay.checkOut;
-  }
 
   var body = template
     .replace(/{保護者名}/g, parentName)
