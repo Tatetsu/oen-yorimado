@@ -289,13 +289,13 @@ function validateOvernightRecords(year, month) {
 function runOvernightValidationManual() {
   var issues = validateOvernightRecords();
   if (issues.length === 0) {
-    SpreadsheetApp.getUi().alert('連泊レコード検証', '問題は検出されませんでした。', SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('フォーム回答検証', '問題は検出されませんでした。', SpreadsheetApp.getUi().ButtonSet.OK);
     return;
   }
   var lines = issues.map(function(it) {
-    return '・' + formatDateYMD_(it.recordDate) + ' ' + it.childName + ': ' + it.issues.join(' / ');
+    return '・' + formatDateYMD_(it.recordDate) + ' ' + String(it.childName || '(児童名なし)') + ': ' + it.issues.join(' / ');
   });
-  SpreadsheetApp.getUi().alert('連泊レコード検証（' + issues.length + '件）', lines.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK);
+  SpreadsheetApp.getUi().alert('フォーム回答検証（' + issues.length + '件）', lines.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /**

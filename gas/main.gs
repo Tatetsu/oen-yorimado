@@ -77,15 +77,15 @@ function runMonthlyProcess() {
     summarySheet.getRange('B1').setValue(ym.year + '年');
     summarySheet.getRange('B2').setValue(ym.month + '月');
 
-    // 0. 連泊レコードのバリデーション
-    var overnightIssues = validateOvernightRecords(ym.year, ym.month);
-    if (overnightIssues.length > 0) {
-      var lines = overnightIssues.slice(0, 20).map(function(it) {
-        return '・' + formatDateYMD_(it.recordDate) + ' ' + it.childName + ': ' + it.issues.join(' / ');
+    // 0. フォーム回答のバリデーション（入所/退所日時の欠落・時系列逆転・期間重複）
+    var responseIssues = validateOvernightRecords(ym.year, ym.month);
+    if (responseIssues.length > 0) {
+      var lines = responseIssues.slice(0, 20).map(function(it) {
+        return '・' + formatDateYMD_(it.recordDate) + ' ' + String(it.childName || '(児童名なし)') + ': ' + it.issues.join(' / ');
       });
-      var more = overnightIssues.length > 20 ? '\n（他 ' + (overnightIssues.length - 20) + ' 件）' : '';
+      var more = responseIssues.length > 20 ? '\n（他 ' + (responseIssues.length - 20) + ' 件）' : '';
       var proceed = ui.alert(
-        '連泊レコードに問題が ' + overnightIssues.length + ' 件あります',
+        'フォーム回答に問題が ' + responseIssues.length + ' 件あります',
         lines.join('\n') + more + '\n\nこのまま処理を続行しますか？',
         ui.ButtonSet.YES_NO
       );

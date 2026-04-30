@@ -154,9 +154,9 @@ function pairLegacyOvernight_(data) {
   Object.keys(byChild).forEach(function(name) {
     var records = byChild[name];
     records.sort(function(a, b) {
-      var da = new Date(a.row[FORM_COL.RECORD_DATE - 1]);
-      var db = new Date(b.row[FORM_COL.RECORD_DATE - 1]);
-      var t = (da.getTime() || 0) - (db.getTime() || 0);
+      var da = getRowRecordDate_(a.row);
+      var db = getRowRecordDate_(b.row);
+      var t = ((da && da.getTime()) || 0) - ((db && db.getTime()) || 0);
       return t !== 0 ? t : (a.idx - b.idx);
     });
 

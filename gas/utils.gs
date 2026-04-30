@@ -88,29 +88,28 @@ const FORM_DATA_START_ROW = 2;
 // 行政様式の実績記録票に合わせ、食事は夕/朝/昼、服薬は夜/朝に分離する
 // CHECK_OUT は「退所予定日時」として扱う（連泊初日・中日は空欄可）
 // 連泊フラグ列は廃止（入所日と退所予定日の差分で連泊判定する）
-// RECORD_DATE はフォームから廃止済み。新規データでは空欄になるため、
-// 取得時は getRowRecordDate_() で TIMESTAMP の日付にフォールバックして使う。
+// 「記録日」項目は廃止済み。フォーム削除に伴いシートの列も削除されるため、
+// 「利用日」は getRowRecordDate_() で TIMESTAMP の日付から導出する。
 const FORM_COL = {
   TIMESTAMP: 1,
-  RECORD_DATE: 2,                // 旧「記録日」(フォームから削除済み・列は互換のため保持)
-  STAFF_NAME: 3,           // スタッフ1
-  STAFF_NAME_2: 4,         // スタッフ2(任意)
-  CHILD_NAME: 5,
-  CHECK_IN: 6,             // 入所日時(連泊・最終日は空欄可)
-  CHECK_OUT: 7,            // 退所予定日時(連泊・初日/中日は空欄可)
-  TEMPERATURE: 8,
-  MEAL_DINNER: 9,          // 夕食
-  MEAL_BREAKFAST: 10,      // 朝食
-  MEAL_LUNCH: 11,          // 昼食
-  BATH: 12,
-  SLEEP_ONSET: 13,         // 入眠時刻
-  SLEEP_CHECK_4AM: 14,     // 朝4時チェック
-  WAKE_UP: 15,             // 起床時刻
-  BOWEL: 16,
-  MEDICINE_NIGHT: 17,      // 服薬(夜)
-  MEDICINE_MORNING: 18,    // 服薬(朝)
-  NOTES: 19,
-  EMAIL_SENT: 20,          // メール送信済(システム管理・初回送信時に追加)
+  STAFF_NAME: 2,           // スタッフ1
+  STAFF_NAME_2: 3,         // スタッフ2(任意)
+  CHILD_NAME: 4,
+  CHECK_IN: 5,             // 入所日時(連泊・最終日は空欄可)
+  CHECK_OUT: 6,            // 退所予定日時(連泊・初日/中日は空欄可)
+  TEMPERATURE: 7,
+  MEAL_DINNER: 8,          // 夕食
+  MEAL_BREAKFAST: 9,       // 朝食
+  MEAL_LUNCH: 10,          // 昼食
+  BATH: 11,
+  SLEEP_ONSET: 12,         // 入眠時刻
+  SLEEP_CHECK_4AM: 13,     // 朝4時チェック
+  WAKE_UP: 14,             // 起床時刻
+  BOWEL: 15,
+  MEDICINE_NIGHT: 16,      // 服薬(夜)
+  MEDICINE_MORNING: 17,    // 服薬(朝)
+  NOTES: 18,
+  EMAIL_SENT: 19,          // メール送信済(システム管理・初回送信時に追加)
 };
 
 // 月別集計の列インデックス（1始まり）
@@ -308,23 +307,13 @@ function isValidDate_(d) {
 }
 
 /**
- * フォーム回答1行から「利用日」(旧:記録日)を導出する
- * - RECORD_DATE 列が有効ならその日付を返す（過去データ互換）
- * - 空ならタイムスタンプの日付部分（送信日）を返す
- * - 全て無効なら null
- * 新仕様: フォームから「記録日」項目を廃止したため、新規データは TIMESTAMP 由来。
+ * フォーム回答1行から「利用日」を導出する
+ * 「記録日」項目は廃止済みのため、タイムスタンプ（送信日時）の日付部分を返す。
  * @param {Array} row フォーム回答の1行
  * @returns {Date|null}
  */
 function getRowRecordDate_(row) {
   if (!row) return null;
-  var raw = row[FORM_COL.RECORD_DATE - 1];
-  if (raw) {
-    var d = (raw instanceof Date) ? raw : new Date(raw);
-    if (isValidDate_(d) && d.getFullYear() >= 1900) {
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    }
-  }
   var ts = row[FORM_COL.TIMESTAMP - 1];
   if (ts) {
     var t = (ts instanceof Date) ? ts : new Date(ts);
@@ -949,7 +938,7 @@ function pairStayRecords_(formResponses) {
     var ta = a.recordDate ? a.recordDate.getTime() : 0;
     var tb = b.recordDate ? b.recordDate.getTime() : 0;
     var t = ta - tb;
-    return t !== 0 ? t : a.childName.localeCompare(b.childName);
+    return t !== 0 ? t : String(a.childName || '').localeCompare(String(b.childName || ''));
   });
   return stays;
 }
